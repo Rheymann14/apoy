@@ -12,7 +12,14 @@ export function AppShell({ children, variant = 'header' }: Props) {
 
     if (variant === 'header') {
         return (
-            <div className="flex min-h-screen w-full flex-col">{children}</div>
+            <div className="relative min-h-screen bg-background">
+                <div className="pointer-events-none absolute inset-0">
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(148,163,184,0.12),transparent_55%)] dark:bg-[radial-gradient(circle_at_top,rgba(148,163,184,0.08),transparent_55%)]" />
+                </div>
+                <div className="relative flex min-h-screen w-full flex-col">
+                    {children}
+                </div>
+            </div>
         );
     }
 
