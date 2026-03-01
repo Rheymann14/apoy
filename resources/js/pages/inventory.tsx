@@ -21,10 +21,11 @@ type InventoryStatus = 'In Stock' | 'Low Stock' | 'Out of Stock';
 
 type InventoryItem = {
     id: number;
-    itemName: string;
-    sku: string;
+    ingredientName: string;
+    code: string;
     category: string;
     quantity: number;
+    unit: string;
     location: string;
     status: InventoryStatus;
 };
@@ -43,111 +44,123 @@ const breadcrumbs: BreadcrumbItem[] = [
 const inventoryItems: InventoryItem[] = [
     {
         id: 1,
-        itemName: 'Dell XPS 13',
-        sku: 'LTP-1001',
-        category: 'Laptop',
-        quantity: 24,
-        location: 'Shelf A1',
+        ingredientName: 'Tomato (Roma)',
+        code: 'PRD-1001',
+        category: 'Produce',
+        quantity: 18,
+        unit: 'kg',
+        location: 'Walk-in Cooler',
         status: 'In Stock',
     },
     {
         id: 2,
-        itemName: 'MacBook Pro 14',
-        sku: 'LTP-1002',
-        category: 'Laptop',
-        quantity: 9,
-        location: 'Shelf A1',
+        ingredientName: 'Yellow Onion',
+        code: 'PRD-1002',
+        category: 'Produce',
+        quantity: 6,
+        unit: 'kg',
+        location: 'Walk-in Cooler',
         status: 'Low Stock',
     },
     {
         id: 3,
-        itemName: 'Logitech MX Keys',
-        sku: 'KEY-2001',
-        category: 'Peripherals',
-        quantity: 40,
-        location: 'Shelf B3',
-        status: 'In Stock',
+        ingredientName: 'Garlic',
+        code: 'PRD-1003',
+        category: 'Produce',
+        quantity: 4,
+        unit: 'kg',
+        location: 'Prep Station Bin',
+        status: 'Low Stock',
     },
     {
         id: 4,
-        itemName: 'Logitech MX Master 3',
-        sku: 'MSE-2004',
-        category: 'Peripherals',
-        quantity: 34,
-        location: 'Shelf B3',
+        ingredientName: 'Chicken Breast',
+        code: 'MET-2001',
+        category: 'Meat',
+        quantity: 25,
+        unit: 'kg',
+        location: 'Freezer A',
         status: 'In Stock',
     },
     {
         id: 5,
-        itemName: '27in Monitor',
-        sku: 'MON-3011',
-        category: 'Display',
-        quantity: 6,
-        location: 'Shelf C2',
+        ingredientName: 'Ground Beef',
+        code: 'MET-2002',
+        category: 'Meat',
+        quantity: 5,
+        unit: 'kg',
+        location: 'Freezer B',
         status: 'Low Stock',
     },
     {
         id: 6,
-        itemName: 'USB-C Docking Hub',
-        sku: 'DOC-4110',
-        category: 'Accessories',
-        quantity: 18,
-        location: 'Shelf D1',
-        status: 'In Stock',
+        ingredientName: 'Salmon Fillet',
+        code: 'SEA-3001',
+        category: 'Seafood',
+        quantity: 0,
+        unit: 'kg',
+        location: 'Freezer A',
+        status: 'Out of Stock',
     },
     {
         id: 7,
-        itemName: 'HDMI Cable 2m',
-        sku: 'CBL-5200',
-        category: 'Accessories',
-        quantity: 51,
-        location: 'Shelf D2',
+        ingredientName: 'Mozzarella Cheese',
+        code: 'DAY-4001',
+        category: 'Dairy',
+        quantity: 12,
+        unit: 'kg',
+        location: 'Walk-in Cooler',
         status: 'In Stock',
     },
     {
         id: 8,
-        itemName: 'Wireless Headset',
-        sku: 'AUD-6100',
-        category: 'Audio',
-        quantity: 0,
-        location: 'Shelf E1',
-        status: 'Out of Stock',
+        ingredientName: 'Heavy Cream',
+        code: 'DAY-4002',
+        category: 'Dairy',
+        quantity: 3,
+        unit: 'L',
+        location: 'Walk-in Cooler',
+        status: 'Low Stock',
     },
     {
         id: 9,
-        itemName: 'Webcam 1080p',
-        sku: 'CAM-7004',
-        category: 'Video',
-        quantity: 13,
-        location: 'Shelf E2',
+        ingredientName: 'Olive Oil (EVOO)',
+        code: 'DRY-5001',
+        category: 'Dry Goods',
+        quantity: 20,
+        unit: 'L',
+        location: 'Dry Storage',
         status: 'In Stock',
     },
     {
         id: 10,
-        itemName: 'Network Switch 24-port',
-        sku: 'NET-8100',
-        category: 'Networking',
-        quantity: 3,
-        location: 'Rack R1',
-        status: 'Low Stock',
+        ingredientName: 'Basmati Rice',
+        code: 'DRY-5002',
+        category: 'Dry Goods',
+        quantity: 35,
+        unit: 'kg',
+        location: 'Dry Storage',
+        status: 'In Stock',
     },
     {
         id: 11,
-        itemName: 'Patch Panel',
-        sku: 'NET-8125',
-        category: 'Networking',
-        quantity: 16,
-        location: 'Rack R2',
+        ingredientName: 'Ground Black Pepper',
+        code: 'SPC-6001',
+        category: 'Spices',
+        quantity: 2,
+        unit: 'kg',
+        location: 'Spice Rack',
         status: 'In Stock',
     },
     {
         id: 12,
-        itemName: 'Surge Protector',
-        sku: 'PWR-9001',
-        category: 'Power',
-        quantity: 28,
-        location: 'Shelf F1',
-        status: 'In Stock',
+        ingredientName: 'Soy Sauce',
+        code: 'CNS-7001',
+        category: 'Condiments',
+        quantity: 2,
+        unit: 'L',
+        location: 'Sauce Station',
+        status: 'Low Stock',
     },
 ];
 
@@ -189,7 +202,14 @@ export default function Inventory() {
         }
 
         return inventoryItems.filter((item) =>
-            [item.itemName, item.sku, item.category, item.location, item.status]
+            [
+                item.ingredientName,
+                item.code,
+                item.category,
+                item.unit,
+                item.location,
+                item.status,
+            ]
                 .join(' ')
                 .toLowerCase()
                 .includes(normalizedQuery),
@@ -228,22 +248,22 @@ export default function Inventory() {
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
-            <Head title="Inventory" />
+            <Head title="Ingredient Inventory" />
 
             <Card className="border-border/70 bg-card/90">
                 <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <CardTitle className="text-2xl tracking-tight">
-                            Inventory
+                            Ingredient Inventory
                         </CardTitle>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            Track stock levels, search items, and manage records
-                            quickly.
+                            Track ingredient stock levels, search pantry items,
+                            and manage kitchen records quickly.
                         </p>
                     </div>
                     <Button className="w-full gap-2 sm:w-auto">
                         <Plus className="size-4" />
-                        Add Item
+                        Add 
                     </Button>
                 </CardHeader>
 
@@ -255,7 +275,7 @@ export default function Inventory() {
                             onChange={(event) =>
                                 handleSearchChange(event.target.value)
                             }
-                            placeholder="Search by item, SKU, category, location..."
+                            placeholder="Search by ingredient, code, category, storage..."
                             className="pl-9"
                         />
                     </div>
@@ -265,10 +285,10 @@ export default function Inventory() {
                             <thead className="bg-muted/40 text-left">
                                 <tr>
                                     <th className="px-4 py-3 font-medium">
-                                        Item
+                                        Ingredient
                                     </th>
                                     <th className="px-4 py-3 font-medium">
-                                        SKU
+                                        Code
                                     </th>
                                     <th className="px-4 py-3 font-medium">
                                         Category
@@ -277,7 +297,10 @@ export default function Inventory() {
                                         Qty
                                     </th>
                                     <th className="px-4 py-3 font-medium">
-                                        Location
+                                        Unit
+                                    </th>
+                                    <th className="px-4 py-3 font-medium">
+                                        Storage
                                     </th>
                                     <th className="px-4 py-3 font-medium">
                                         Status
@@ -291,10 +314,10 @@ export default function Inventory() {
                                 {paginatedItems.length === 0 ? (
                                     <tr>
                                         <td
-                                            colSpan={7}
+                                            colSpan={8}
                                             className="px-4 py-8 text-center text-muted-foreground"
                                         >
-                                            No inventory item matched your
+                                            No ingredient matched your
                                             search.
                                         </td>
                                     </tr>
@@ -305,16 +328,19 @@ export default function Inventory() {
                                             className="border-t border-border/70"
                                         >
                                             <td className="px-4 py-3 font-medium">
-                                                {item.itemName}
+                                                {item.ingredientName}
                                             </td>
                                             <td className="px-4 py-3 text-muted-foreground">
-                                                {item.sku}
+                                                {item.code}
                                             </td>
                                             <td className="px-4 py-3 text-muted-foreground">
                                                 {item.category}
                                             </td>
                                             <td className="px-4 py-3">
                                                 {item.quantity}
+                                            </td>
+                                            <td className="px-4 py-3 text-muted-foreground">
+                                                {item.unit}
                                             </td>
                                             <td className="px-4 py-3 text-muted-foreground">
                                                 {item.location}
@@ -329,7 +355,7 @@ export default function Inventory() {
                                                         variant="ghost"
                                                         size="icon"
                                                         className="size-8"
-                                                        aria-label={`Edit ${item.itemName}`}
+                                                        aria-label={`Edit ${item.ingredientName}`}
                                                     >
                                                         <Pencil className="size-4" />
                                                     </Button>
@@ -338,7 +364,7 @@ export default function Inventory() {
                                                         variant="ghost"
                                                         size="icon"
                                                         className="size-8 text-destructive hover:text-destructive"
-                                                        aria-label={`Delete ${item.itemName}`}
+                                                        aria-label={`Delete ${item.ingredientName}`}
                                                     >
                                                         <Trash2 className="size-4" />
                                                     </Button>
@@ -354,7 +380,7 @@ export default function Inventory() {
                     <div className="space-y-3 md:hidden">
                         {paginatedItems.length === 0 ? (
                             <div className="rounded-lg border border-border/70 p-5 text-center text-sm text-muted-foreground">
-                                No inventory item matched your search.
+                                No ingredient matched your search.
                             </div>
                         ) : (
                             paginatedItems.map((item) => (
@@ -365,10 +391,10 @@ export default function Inventory() {
                                     <div className="flex items-start justify-between gap-3">
                                         <div>
                                             <p className="font-medium">
-                                                {item.itemName}
+                                                {item.ingredientName}
                                             </p>
                                             <p className="text-xs text-muted-foreground">
-                                                {item.sku}
+                                                {item.code}
                                             </p>
                                         </div>
                                         {getStatusBadge(item.status)}
@@ -376,7 +402,8 @@ export default function Inventory() {
                                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                                         <p>Category: {item.category}</p>
                                         <p>Qty: {item.quantity}</p>
-                                        <p>Location: {item.location}</p>
+                                        <p>Unit: {item.unit}</p>
+                                        <p>Storage: {item.location}</p>
                                     </div>
                                     <div className="mt-4 flex justify-end gap-2">
                                         <Button
@@ -407,7 +434,7 @@ export default function Inventory() {
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Package className="size-4" />
                             Showing {startItem}-{endItem} of{' '}
-                            {filteredItems.length} items
+                            {filteredItems.length} ingredients
                         </div>
 
                         <div className="flex items-center gap-2 self-end sm:self-auto">
