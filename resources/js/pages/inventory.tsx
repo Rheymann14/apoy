@@ -187,7 +187,7 @@ const initialInventoryItems: InventoryItem[] = [
     },
 ];
 
-const ITEMS_PER_PAGE = 5;
+const entriesPerPageOptions = [10, 50, 100] as const;
 const statusOptions: InventoryStatus[] = ['In Stock', 'Low Stock', 'Out of Stock'];
 const defaultForm: IngredientForm = {
     name: '',
@@ -220,7 +220,10 @@ const buildIngredientCode = (category: string, id: number) => {
 const getStatusBadge = (status: InventoryStatus) => {
     if (status === 'Out of Stock') {
         return (
-            <Badge variant="destructive" className="rounded-full">
+            <Badge
+                variant="outline"
+                className="rounded-full border-red-300 bg-red-100 text-red-800 dark:border-red-500/60 dark:bg-red-500/20 dark:text-red-200"
+            >
                 {status}
             </Badge>
         );
@@ -228,14 +231,20 @@ const getStatusBadge = (status: InventoryStatus) => {
 
     if (status === 'Low Stock') {
         return (
-            <Badge variant="secondary" className="rounded-full">
+            <Badge
+                variant="outline"
+                className="rounded-full border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-500/60 dark:bg-amber-500/20 dark:text-amber-200"
+            >
                 {status}
             </Badge>
         );
     }
 
     return (
-        <Badge variant="default" className="rounded-full">
+        <Badge
+            variant="outline"
+            className="rounded-full border-green-300 bg-green-100 text-green-800 dark:border-green-500/60 dark:bg-green-500/20 dark:text-green-200"
+        >
             {status}
         </Badge>
     );
@@ -245,6 +254,7 @@ export default function Inventory() {
     const [items, setItems] = useState(initialInventoryItems);
     const [search, setSearch] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
+    const [entriesPerPage, setEntriesPerPage] = useState<number>(10);
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [addForm, setAddForm] = useState<IngredientForm>(defaultForm);
     const [isAddStatusMenuOpen, setIsAddStatusMenuOpen] = useState(false);
@@ -310,18 +320,18 @@ export default function Inventory() {
 
     const totalPages = Math.max(
         1,
-        Math.ceil(filteredItems.length / ITEMS_PER_PAGE),
+        Math.ceil(filteredItems.length / entriesPerPage),
     );
 
     const paginatedItems = useMemo(() => {
-        const start = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredItems.slice(start, start + ITEMS_PER_PAGE);
-    }, [currentPage, filteredItems]);
+        const start = (currentPage - 1) * entriesPerPage;
+        return filteredItems.slice(start, start + entriesPerPage);
+    }, [currentPage, entriesPerPage, filteredItems]);
 
     const startItem =
-        filteredItems.length === 0 ? 0 : (currentPage - 1) * ITEMS_PER_PAGE + 1;
+        filteredItems.length === 0 ? 0 : (currentPage - 1) * entriesPerPage + 1;
     const endItem = Math.min(
-        currentPage * ITEMS_PER_PAGE,
+        currentPage * entriesPerPage,
         filteredItems.length,
     );
     const filteredAddStatuses = statusOptions.filter((status) =>
@@ -333,6 +343,13 @@ export default function Inventory() {
 
     const handleSearchChange = (value: string) => {
         setSearch(value);
+        setCurrentPage(1);
+    };
+
+    const handleEntriesPerPageChange = (
+        event: ChangeEvent<HTMLSelectElement>,
+    ) => {
+        setEntriesPerPage(Number.parseInt(event.target.value, 10));
         setCurrentPage(1);
     };
 
@@ -841,16 +858,35 @@ export default function Inventory() {
                 </CardHeader>
 
                 <CardContent className="space-y-4">
-                    <div className="relative max-w-md">
-                        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                            value={search}
-                            onChange={(event) =>
-                                handleSearchChange(event.target.value)
-                            }
-                            placeholder="Search by name, code, category, storage..."
-                            className="pl-9"
-                        />
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="relative w-full max-w-md">
+                            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                value={search}
+                                onChange={(event) =>
+                                    handleSearchChange(event.target.value)
+                                }
+                                placeholder="Search by name, code, category, storage..."
+                                className="pl-9"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2 self-end sm:self-auto">
+                            <Label htmlFor="entries-per-page" className="text-sm text-muted-foreground">
+                                Show entries
+                            </Label>
+                            <select
+                                id="entries-per-page"
+                                value={entriesPerPage}
+                                onChange={handleEntriesPerPageChange}
+                                className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 w-20 rounded-md border px-3 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
+                            >
+                                {entriesPerPageOptions.map((option) => (
+                                    <option key={option} value={option}>
+                                        {option}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
 
                     <div className="hidden overflow-x-auto rounded-lg border border-border/70 md:block">
@@ -904,7 +940,7 @@ export default function Inventory() {
                                             className="border-t border-border/70"
                                         >
                                             <td className="px-4 py-3 text-muted-foreground">
-                                                {(currentPage - 1) * ITEMS_PER_PAGE +
+                                                {(currentPage - 1) * entriesPerPage +
                                                     index +
                                                     1}
                                             </td>
@@ -975,7 +1011,7 @@ export default function Inventory() {
                                             <p className="font-medium">
                                                 #{' '}
                                                 {(currentPage - 1) *
-                                                    ITEMS_PER_PAGE +
+                                                    entriesPerPage +
                                                     index +
                                                     1}{' '}
                                                 {item.name}
