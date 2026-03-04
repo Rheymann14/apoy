@@ -511,8 +511,8 @@ export default function Inventory() {
                             Ingredient Inventory
                         </CardTitle>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            Track ingredient stock levels, search pantry items,
-                            and manage kitchen records quickly.
+                            Track ingredient stock levels,
+                            and manage storage records quickly.
                         </p>
                     </div>
                     <Dialog open={isAddDialogOpen} onOpenChange={handleAddDialogOpenChange}>
