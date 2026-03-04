@@ -1,9 +1,9 @@
 import { Link, usePage } from '@inertiajs/react';
 import {
-    BookOpen,
     LayoutGrid,
     Menu,
     Package,
+    Settings,
 } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import AppLogoIcon from '@/components/app-logo-icon';
@@ -37,7 +37,7 @@ import {
 import { UserMenuContent } from '@/components/user-menu-content';
 import { useCurrentUrl } from '@/hooks/use-current-url';
 import { useInitials } from '@/hooks/use-initials';
-import { cn, toUrl } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { dashboard, inventory } from '@/routes';
 import type { BreadcrumbItem, NavItem } from '@/types';
 
@@ -60,9 +60,9 @@ const mainNavItems: NavItem[] = [
 
 const rightNavItems: NavItem[] = [
     {
-        title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits#react',
-        icon: BookOpen,
+        title: 'Management',
+        href: '/management',
+        icon: Settings,
     },
 ];
 
@@ -118,18 +118,17 @@ export function AppHeader({ breadcrumbs = [] }: Props) {
 
                                         <div className="flex flex-col space-y-4">
                                             {rightNavItems.map((item) => (
-                                                <a
+                                                <Link
                                                     key={item.title}
-                                                    href={toUrl(item.href)}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
+                                                    href={item.href}
+                                                    prefetch
                                                     className="flex items-center space-x-2 font-medium"
                                                 >
                                                     {item.icon && (
                                                         <item.icon className="h-5 w-5" />
                                                     )}
                                                     <span>{item.title}</span>
-                                                </a>
+                                                </Link>
                                             ))}
                                         </div>
                                     </div>
@@ -185,11 +184,10 @@ export function AppHeader({ breadcrumbs = [] }: Props) {
                                     delayDuration={0}
                                 >
                                     <Tooltip>
-                                        <TooltipTrigger>
-                                            <a
-                                                href={toUrl(item.href)}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
+                                        <TooltipTrigger asChild>
+                                            <Link
+                                                href={item.href}
+                                                prefetch
                                                 className="group inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/80 bg-card p-0 text-sm font-medium text-accent-foreground ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                                             >
                                                 <span className="sr-only">
@@ -198,7 +196,7 @@ export function AppHeader({ breadcrumbs = [] }: Props) {
                                                 {item.icon && (
                                                     <item.icon className="size-5 opacity-80 group-hover:opacity-100" />
                                                 )}
-                                            </a>
+                                            </Link>
                                         </TooltipTrigger>
                                         <TooltipContent>
                                             <p>{item.title}</p>
