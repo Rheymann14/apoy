@@ -14,6 +14,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->name('management.users.store');
     Route::put('management/users/{user}', [ManagementController::class, 'updateUser'])
         ->name('management.users.update');
+    Route::put('management/users/{user}/reset-password', [ManagementController::class, 'resetUserPassword'])
+        ->name('management.users.reset-password');
     Route::delete('management/users/{user}', [ManagementController::class, 'destroyUser'])
         ->name('management.users.destroy');
 });

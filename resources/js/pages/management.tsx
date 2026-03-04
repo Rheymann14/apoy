@@ -1,8 +1,10 @@
 import { Head, router } from '@inertiajs/react';
 import {
     Building2,
+    Loader2,
     Pencil,
     Plus,
+    RotateCcw,
     Ruler,
     Tags,
     Trash2,
@@ -30,6 +32,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import AppLayout from '@/layouts/app-layout';
 import { cn } from '@/lib/utils';
 import { dashboard } from '@/routes';
@@ -194,6 +197,10 @@ export default function Management({ roles, users }: ManagementPageProps) {
     });
     const [editAccountUserId, setEditAccountUserId] = useState<number | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [resettingUserId, setResettingUserId] = useState<number | null>(null);
+    const [accountSearch, setAccountSearch] = useState('');
+    const [accountPage, setAccountPage] = useState(1);
+    const [accountPageSize, setAccountPageSize] = useState(10);
 
     useEffect(() => {
         setAccountUsers(users);
@@ -219,6 +226,35 @@ export default function Management({ roles, users }: ManagementPageProps) {
     const ActiveIcon = tabIcons[activeTabData.value];
     const isAccountTab = activeTab === 'account';
     const activeLocalItems = !isAccountTab ? localTabItems[activeTab] : [];
+    const filteredAccountUsers = useMemo(() => {
+        const query = accountSearch.trim().toLowerCase();
+        if (!query) {
+            return accountUsers;
+        }
+
+        return accountUsers.filter((user) => {
+            const searchable = `${user.name} ${user.email} ${user.role}`.toLowerCase();
+            return searchable.includes(query);
+        });
+    }, [accountUsers, accountSearch]);
+    const totalAccountPages = useMemo(
+        () => Math.max(1, Math.ceil(filteredAccountUsers.length / accountPageSize)),
+        [filteredAccountUsers.length, accountPageSize],
+    );
+    const paginatedAccountUsers = useMemo(() => {
+        const startIndex = (accountPage - 1) * accountPageSize;
+        return filteredAccountUsers.slice(startIndex, startIndex + accountPageSize);
+    }, [filteredAccountUsers, accountPage, accountPageSize]);
+    const accountEntryStart =
+        filteredAccountUsers.length === 0 ? 0 : (accountPage - 1) * accountPageSize + 1;
+    const accountEntryEnd =
+        filteredAccountUsers.length === 0
+            ? 0
+            : Math.min(accountPage * accountPageSize, filteredAccountUsers.length);
+
+    useEffect(() => {
+        setAccountPage((currentPage) => Math.min(currentPage, totalAccountPages));
+    }, [totalAccountPages]);
 
     const closeAddDialog = () => {
         setIsAddDialogOpen(false);
@@ -359,6 +395,23 @@ export default function Management({ roles, users }: ManagementPageProps) {
         });
     };
 
+    const handleResetPassword = (id: number) => {
+        const toastId = toast.loading('Resetting password...');
+        setResettingUserId(id);
+        router.put(`/management/users/${id}/reset-password`, {}, {
+            preserveScroll: true,
+            onSuccess: () =>
+                toast.success('Password reset successfully. Default password is apoy1234.', {
+                    id: toastId,
+                }),
+            onError: (errors) =>
+                toast.error(getFirstErrorMessage(errors), {
+                    id: toastId,
+                }),
+            onFinish: () => setResettingUserId(null),
+        });
+    };
+
     const isAddDisabled = isAccountTab
         ? !addAccountForm.name.trim() ||
           !addAccountForm.email.trim() ||
@@ -426,6 +479,35 @@ export default function Management({ roles, users }: ManagementPageProps) {
                         <p className="mt-2 text-sm text-muted-foreground">
                             {activeTabData.description}
                         </p>
+                        {isAccountTab ? (
+                            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <Input
+                                    value={accountSearch}
+                                    onChange={(event) => {
+                                        setAccountSearch(event.target.value);
+                                        setAccountPage(1);
+                                    }}
+                                    placeholder="Search name, email, or role..."
+                                    className="sm:max-w-sm"
+                                />
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <span>Show</span>
+                                    <select
+                                        value={accountPageSize}
+                                        onChange={(event) => {
+                                            setAccountPageSize(Number(event.target.value));
+                                            setAccountPage(1);
+                                        }}
+                                        className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
+                                    >
+                                        <option value={10}>10</option>
+                                        <option value={50}>50</option>
+                                        <option value={100}>100</option>
+                                    </select>
+                                    <span>entries</span>
+                                </div>
+                            </div>
+                        ) : null}
 
                         <div className="mt-4 overflow-x-auto rounded-lg border border-border/70">
                             <table className="min-w-full text-sm">
@@ -457,8 +539,17 @@ export default function Management({ roles, users }: ManagementPageProps) {
                                                         No account entries found.
                                                     </td>
                                                 </tr>
+                                            ) : filteredAccountUsers.length === 0 ? (
+                                                <tr>
+                                                    <td
+                                                        colSpan={4}
+                                                        className="px-4 py-8 text-center text-muted-foreground"
+                                                    >
+                                                        No matching accounts found.
+                                                    </td>
+                                                </tr>
                                             ) : (
-                                                accountUsers.map((user) => (
+                                                paginatedAccountUsers.map((user) => (
                                                     <tr
                                                         key={user.id}
                                                         className="border-t border-border/70"
@@ -483,34 +574,78 @@ export default function Management({ roles, users }: ManagementPageProps) {
                                                         </td>
                                                         <td className="px-4 py-3">
                                                             <div className="flex items-center justify-end gap-2">
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="size-8"
-                                                                    aria-label={`Edit ${user.name}`}
-                                                                    onClick={() =>
-                                                                        openEditAccountDialog(
-                                                                            user,
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <Pencil className="size-4" />
-                                                                </Button>
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="size-8 text-destructive hover:text-destructive"
-                                                                    aria-label={`Delete ${user.name}`}
-                                                                    onClick={() =>
-                                                                        handleDeleteAccount(
-                                                                            user.id,
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <Trash2 className="size-4" />
-                                                                </Button>
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="size-8"
+                                                                            aria-label={`Reset password for ${user.name}`}
+                                                                            onClick={() =>
+                                                                                handleResetPassword(
+                                                                                    user.id,
+                                                                                )
+                                                                            }
+                                                                            disabled={
+                                                                                resettingUserId !==
+                                                                                null
+                                                                            }
+                                                                        >
+                                                                            {resettingUserId ===
+                                                                            user.id ? (
+                                                                                <Loader2 className="size-4 animate-spin" />
+                                                                            ) : (
+                                                                                <RotateCcw className="size-4" />
+                                                                            )}
+                                                                        </Button>
+                                                                    </TooltipTrigger>
+                                                                    <TooltipContent>
+                                                                        Reset password
+                                                                    </TooltipContent>
+                                                                </Tooltip>
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="size-8"
+                                                                            aria-label={`Edit ${user.name}`}
+                                                                            onClick={() =>
+                                                                                openEditAccountDialog(
+                                                                                    user,
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            <Pencil className="size-4" />
+                                                                        </Button>
+                                                                    </TooltipTrigger>
+                                                                    <TooltipContent>
+                                                                        Edit
+                                                                    </TooltipContent>
+                                                                </Tooltip>
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="size-8 text-destructive hover:text-destructive"
+                                                                            aria-label={`Delete ${user.name}`}
+                                                                            onClick={() =>
+                                                                                handleDeleteAccount(
+                                                                                    user.id,
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            <Trash2 className="size-4" />
+                                                                        </Button>
+                                                                    </TooltipTrigger>
+                                                                    <TooltipContent>
+                                                                        Delete
+                                                                    </TooltipContent>
+                                                                </Tooltip>
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -551,34 +686,48 @@ export default function Management({ roles, users }: ManagementPageProps) {
                                                         </td>
                                                         <td className="px-4 py-3">
                                                             <div className="flex items-center justify-end gap-2">
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="size-8"
-                                                                    aria-label={`Edit ${item.name}`}
-                                                                    onClick={() =>
-                                                                        openEditLocalDialog(
-                                                                            item,
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <Pencil className="size-4" />
-                                                                </Button>
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="size-8 text-destructive hover:text-destructive"
-                                                                    aria-label={`Delete ${item.name}`}
-                                                                    onClick={() =>
-                                                                        handleDeleteLocal(
-                                                                            item.id,
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <Trash2 className="size-4" />
-                                                                </Button>
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="size-8"
+                                                                            aria-label={`Edit ${item.name}`}
+                                                                            onClick={() =>
+                                                                                openEditLocalDialog(
+                                                                                    item,
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            <Pencil className="size-4" />
+                                                                        </Button>
+                                                                    </TooltipTrigger>
+                                                                    <TooltipContent>
+                                                                        Edit
+                                                                    </TooltipContent>
+                                                                </Tooltip>
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="size-8 text-destructive hover:text-destructive"
+                                                                            aria-label={`Delete ${item.name}`}
+                                                                            onClick={() =>
+                                                                                handleDeleteLocal(
+                                                                                    item.id,
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            <Trash2 className="size-4" />
+                                                                        </Button>
+                                                                    </TooltipTrigger>
+                                                                    <TooltipContent>
+                                                                        Delete
+                                                                    </TooltipContent>
+                                                                </Tooltip>
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -589,6 +738,46 @@ export default function Management({ roles, users }: ManagementPageProps) {
                                 )}
                             </table>
                         </div>
+                        {isAccountTab && accountUsers.length > 0 ? (
+                            <div className="mt-3 flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                                <p>
+                                    Showing {accountEntryStart} to {accountEntryEnd} of{' '}
+                                    {filteredAccountUsers.length} entries
+                                </p>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() =>
+                                            setAccountPage((currentPage) =>
+                                                Math.max(currentPage - 1, 1),
+                                            )
+                                        }
+                                        disabled={accountPage <= 1}
+                                    >
+                                        Previous
+                                    </Button>
+                                    <span className="min-w-24 text-center">
+                                        Page {accountPage} of {totalAccountPages}
+                                    </span>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() =>
+                                            setAccountPage((currentPage) =>
+                                                Math.min(
+                                                    currentPage + 1,
+                                                    totalAccountPages,
+                                                ),
+                                            )
+                                        }
+                                        disabled={accountPage >= totalAccountPages}
+                                    >
+                                        Next
+                                    </Button>
+                                </div>
+                            </div>
+                        ) : null}
                     </div>
                 </CardContent>
             </Card>
@@ -683,7 +872,14 @@ export default function Management({ roles, users }: ManagementPageProps) {
                                 Cancel
                             </Button>
                             <Button type="submit" disabled={isSubmitting || isAddDisabled}>
-                                Save
+                                {isSubmitting ? (
+                                    <>
+                                        <Loader2 className="mr-2 size-4 animate-spin" />
+                                        Saving...
+                                    </>
+                                ) : (
+                                    'Save'
+                                )}
                             </Button>
                         </DialogFooter>
                     </form>
@@ -780,7 +976,14 @@ export default function Management({ roles, users }: ManagementPageProps) {
                                 Cancel
                             </Button>
                             <Button type="submit" disabled={isSubmitting || isEditDisabled}>
-                                Save Changes
+                                {isSubmitting ? (
+                                    <>
+                                        <Loader2 className="mr-2 size-4 animate-spin" />
+                                        Saving changes...
+                                    </>
+                                ) : (
+                                    'Save Changes'
+                                )}
                             </Button>
                         </DialogFooter>
                     </form>

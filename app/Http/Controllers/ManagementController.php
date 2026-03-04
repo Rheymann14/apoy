@@ -105,6 +105,18 @@ class ManagementController extends Controller
     }
 
     /**
+     * Reset a user's password from management page.
+     */
+    public function resetUserPassword(User $user): RedirectResponse
+    {
+        $user->update([
+            'password' => Hash::make('apoy1234'),
+        ]);
+
+        return to_route('management');
+    }
+
+    /**
      * Delete a user from management page.
      */
     public function destroyUser(Request $request, User $user): RedirectResponse
