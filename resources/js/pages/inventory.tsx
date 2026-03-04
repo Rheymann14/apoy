@@ -1,4 +1,4 @@
-import { Head } from '@inertiajs/react';
+import { Head, router } from '@inertiajs/react';
 import {
     Check,
     ChevronLeft,
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -33,24 +34,39 @@ import type { BreadcrumbItem } from '@/types';
 
 type InventoryStatus = 'In Stock' | 'Low Stock' | 'Out of Stock';
 
+type InventoryOption = {
+    id: number;
+    name: string;
+};
+
 type InventoryItem = {
     id: number;
     name: string;
     code: string;
+    category_id: number;
     category: string;
     quantity: number;
+    unit_id: number;
     unit: string;
+    storage_id: number;
     storage: string;
     status: InventoryStatus;
 };
 
 type IngredientForm = {
     name: string;
-    category: string;
+    categoryId: string;
     quantity: string;
-    unit: string;
-    storage: string;
+    unitId: string;
+    storageId: string;
     status: InventoryStatus;
+};
+
+type InventoryPageProps = {
+    categories: InventoryOption[];
+    units: InventoryOption[];
+    storages: InventoryOption[];
+    ingredients: InventoryItem[];
 };
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -64,157 +80,52 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 
-const initialInventoryItems: InventoryItem[] = [
-    {
-        id: 1,
-        name: 'Tomato (Roma)',
-        code: 'PRD-1001',
-        category: 'Produce',
-        quantity: 18,
-        unit: 'kg',
-        storage: 'Walk-in Cooler',
-        status: 'In Stock',
-    },
-    {
-        id: 2,
-        name: 'Yellow Onion',
-        code: 'PRD-1002',
-        category: 'Produce',
-        quantity: 6,
-        unit: 'kg',
-        storage: 'Walk-in Cooler',
-        status: 'Low Stock',
-    },
-    {
-        id: 3,
-        name: 'Garlic',
-        code: 'PRD-1003',
-        category: 'Produce',
-        quantity: 4,
-        unit: 'kg',
-        storage: 'Prep Station Bin',
-        status: 'Low Stock',
-    },
-    {
-        id: 4,
-        name: 'Chicken Breast',
-        code: 'MET-2001',
-        category: 'Meat',
-        quantity: 25,
-        unit: 'kg',
-        storage: 'Freezer A',
-        status: 'In Stock',
-    },
-    {
-        id: 5,
-        name: 'Ground Beef',
-        code: 'MET-2002',
-        category: 'Meat',
-        quantity: 5,
-        unit: 'kg',
-        storage: 'Freezer B',
-        status: 'Low Stock',
-    },
-    {
-        id: 6,
-        name: 'Salmon Fillet',
-        code: 'SEA-3001',
-        category: 'Seafood',
-        quantity: 0,
-        unit: 'kg',
-        storage: 'Freezer A',
-        status: 'Out of Stock',
-    },
-    {
-        id: 7,
-        name: 'Mozzarella Cheese',
-        code: 'DAY-4001',
-        category: 'Dairy',
-        quantity: 12,
-        unit: 'kg',
-        storage: 'Walk-in Cooler',
-        status: 'In Stock',
-    },
-    {
-        id: 8,
-        name: 'Heavy Cream',
-        code: 'DAY-4002',
-        category: 'Dairy',
-        quantity: 3,
-        unit: 'L',
-        storage: 'Walk-in Cooler',
-        status: 'Low Stock',
-    },
-    {
-        id: 9,
-        name: 'Olive Oil (EVOO)',
-        code: 'DRY-5001',
-        category: 'Dry Goods',
-        quantity: 20,
-        unit: 'L',
-        storage: 'Dry Storage',
-        status: 'In Stock',
-    },
-    {
-        id: 10,
-        name: 'Basmati Rice',
-        code: 'DRY-5002',
-        category: 'Dry Goods',
-        quantity: 35,
-        unit: 'kg',
-        storage: 'Dry Storage',
-        status: 'In Stock',
-    },
-    {
-        id: 11,
-        name: 'Ground Black Pepper',
-        code: 'SPC-6001',
-        category: 'Spices',
-        quantity: 2,
-        unit: 'kg',
-        storage: 'Spice Rack',
-        status: 'In Stock',
-    },
-    {
-        id: 12,
-        name: 'Soy Sauce',
-        code: 'CNS-7001',
-        category: 'Condiments',
-        quantity: 2,
-        unit: 'L',
-        storage: 'Sauce Station',
-        status: 'Low Stock',
-    },
-];
-
 const entriesPerPageOptions = [10, 50, 100] as const;
 const statusOptions: InventoryStatus[] = ['In Stock', 'Low Stock', 'Out of Stock'];
 const defaultForm: IngredientForm = {
     name: '',
-    category: '',
+    categoryId: '',
     quantity: '0',
-    unit: '',
-    storage: '',
+    unitId: '',
+    storageId: '',
     status: 'In Stock',
 };
 
 const toIngredientForm = (item: InventoryItem): IngredientForm => ({
     name: item.name,
-    category: item.category,
+    categoryId: String(item.category_id),
     quantity: String(item.quantity),
-    unit: item.unit,
-    storage: item.storage,
+    unitId: String(item.unit_id),
+    storageId: String(item.storage_id),
     status: item.status,
 });
 
-const buildIngredientCode = (category: string, id: number) => {
-    const prefix = category
-        .toUpperCase()
-        .replace(/[^A-Z]/g, '')
-        .slice(0, 3)
-        .padEnd(3, 'X');
+const normalizeName = (value: string) =>
+    value.trim().replace(/\s+/g, ' ');
 
-    return `${prefix}-${String(id).padStart(4, '0')}`;
+const getFirstErrorMessage = (errors: unknown) => {
+    if (!errors || typeof errors !== 'object') {
+        return 'Validation error. Please check your input.';
+    }
+
+    for (const value of Object.values(errors as Record<string, unknown>)) {
+        if (typeof value === 'string' && value.trim()) {
+            return value;
+        }
+
+        if (Array.isArray(value)) {
+            const first = value.find(
+                (entry): entry is string =>
+                    typeof entry === 'string' && entry.trim().length > 0,
+            );
+
+            if (first) {
+                return first;
+            }
+        }
+    }
+
+    return 'Validation error. Please check your input.';
 };
 
 const getStatusBadge = (status: InventoryStatus) => {
@@ -250,22 +161,155 @@ const getStatusBadge = (status: InventoryStatus) => {
     );
 };
 
-export default function Inventory() {
-    const [items, setItems] = useState(initialInventoryItems);
+type SearchableOptionFieldProps = {
+    id: string;
+    label: string;
+    value: string;
+    options: InventoryOption[];
+    placeholder: string;
+    searchPlaceholder: string;
+    emptyLabel: string;
+    onValueChange: (value: string) => void;
+};
+
+function SearchableOptionField({
+    id,
+    label,
+    value,
+    options,
+    placeholder,
+    searchPlaceholder,
+    emptyLabel,
+    onValueChange,
+}: SearchableOptionFieldProps) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [search, setSearch] = useState('');
+    const menuRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+        if (!isOpen) {
+            return;
+        }
+
+        const onPointerDown = (event: MouseEvent) => {
+            if (
+                menuRef.current &&
+                !menuRef.current.contains(event.target as Node)
+            ) {
+                setIsOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', onPointerDown);
+        return () => document.removeEventListener('mousedown', onPointerDown);
+    }, [isOpen]);
+
+    const selectedOption = options.find(
+        (option) => String(option.id) === value,
+    );
+    const filteredOptions = useMemo(() => {
+        const normalizedSearch = search.trim().toLowerCase();
+        if (!normalizedSearch) {
+            return options;
+        }
+
+        return options.filter((option) =>
+            option.name.toLowerCase().includes(normalizedSearch),
+        );
+    }, [options, search]);
+
+    return (
+        <div className="space-y-2">
+            <Label htmlFor={id}>{label}</Label>
+            <div ref={menuRef} className="relative">
+                <Button
+                    id={id}
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-between font-normal"
+                    onClick={() => setIsOpen((open) => !open)}
+                >
+                    <span className={cn(!selectedOption && 'text-muted-foreground')}>
+                        {selectedOption?.name || placeholder}
+                    </span>
+                    <ChevronsUpDown className="size-4 opacity-50" />
+                </Button>
+
+                {isOpen ? (
+                    <div className="bg-popover text-popover-foreground absolute z-20 mt-1 w-full rounded-md border shadow-md">
+                        <div className="border-b p-2">
+                            <Input
+                                value={search}
+                                onChange={(event) => setSearch(event.target.value)}
+                                placeholder={searchPlaceholder}
+                                className="h-8"
+                            />
+                        </div>
+                        <div className="max-h-44 overflow-y-auto p-1">
+                            {filteredOptions.length === 0 ? (
+                                <p className="px-2 py-1.5 text-sm text-muted-foreground">
+                                    {emptyLabel}
+                                </p>
+                            ) : (
+                                filteredOptions.map((option) => (
+                                    <button
+                                        key={option.id}
+                                        type="button"
+                                        className="hover:bg-accent hover:text-accent-foreground flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-sm"
+                                        onClick={() => {
+                                            onValueChange(String(option.id));
+                                            setSearch('');
+                                            setIsOpen(false);
+                                        }}
+                                    >
+                                        {option.name}
+                                        <Check
+                                            className={cn(
+                                                'size-4',
+                                                value === String(option.id)
+                                                    ? 'opacity-100'
+                                                    : 'opacity-0',
+                                            )}
+                                        />
+                                    </button>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                ) : null}
+            </div>
+        </div>
+    );
+}
+
+export default function Inventory({
+    categories,
+    units,
+    storages,
+    ingredients,
+}: InventoryPageProps) {
+    const [items, setItems] = useState<InventoryItem[]>(ingredients);
     const [search, setSearch] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const [entriesPerPage, setEntriesPerPage] = useState<number>(10);
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [addForm, setAddForm] = useState<IngredientForm>(defaultForm);
+    const [isAdding, setIsAdding] = useState(false);
     const [isAddStatusMenuOpen, setIsAddStatusMenuOpen] = useState(false);
     const [addStatusSearch, setAddStatusSearch] = useState('');
     const addStatusMenuRef = useRef<HTMLDivElement | null>(null);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [editItemId, setEditItemId] = useState<number | null>(null);
     const [editForm, setEditForm] = useState<IngredientForm>(defaultForm);
+    const [isEditing, setIsEditing] = useState(false);
     const [isEditStatusMenuOpen, setIsEditStatusMenuOpen] = useState(false);
     const [editStatusSearch, setEditStatusSearch] = useState('');
     const editStatusMenuRef = useRef<HTMLDivElement | null>(null);
+    const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
+
+    useEffect(() => {
+        setItems(ingredients);
+    }, [ingredients]);
 
     useEffect(() => {
         const onPointerDown = (event: MouseEvent) => {
@@ -419,23 +463,25 @@ export default function Inventory() {
         const normalizedQuantity = Number.isFinite(quantity)
             ? Math.max(0, quantity)
             : 0;
-        const nextId = items.reduce((maxId, item) => Math.max(maxId, item.id), 0) + 1;
-        const category = addForm.category.trim();
 
-        const newItem: InventoryItem = {
-            id: nextId,
-            name: addForm.name.trim(),
-            code: buildIngredientCode(category, nextId),
-            category,
+        setIsAdding(true);
+        router.post('/inventory/ingredients', {
+            name: normalizeName(addForm.name),
+            category_id: Number.parseInt(addForm.categoryId, 10),
             quantity: normalizedQuantity,
-            unit: addForm.unit.trim(),
-            storage: addForm.storage.trim(),
+            unit_id: Number.parseInt(addForm.unitId, 10),
+            storage_id: Number.parseInt(addForm.storageId, 10),
             status: addForm.status,
-        };
-
-        setItems((current) => [newItem, ...current]);
-        setCurrentPage(1);
-        handleAddDialogOpenChange(false);
+        }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                toast.success('Ingredient added successfully.');
+                setCurrentPage(1);
+                handleAddDialogOpenChange(false);
+            },
+            onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+            onFinish: () => setIsAdding(false),
+        });
     };
 
     const openEditDialog = (item: InventoryItem) => {
@@ -458,39 +504,48 @@ export default function Inventory() {
             ? Math.max(0, quantity)
             : 0;
 
-        setItems((current) =>
-            current.map((item) => {
-                if (item.id !== editItemId) {
-                    return item;
-                }
+        setIsEditing(true);
+        router.put(`/inventory/ingredients/${editItemId}`, {
+            name: normalizeName(editForm.name),
+            category_id: Number.parseInt(editForm.categoryId, 10),
+            quantity: normalizedQuantity,
+            unit_id: Number.parseInt(editForm.unitId, 10),
+            storage_id: Number.parseInt(editForm.storageId, 10),
+            status: editForm.status,
+        }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                toast.success('Ingredient updated successfully.');
+                handleEditDialogOpenChange(false);
+            },
+            onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+            onFinish: () => setIsEditing(false),
+        });
+    };
 
-                return {
-                    ...item,
-                    name: editForm.name.trim(),
-                    category: editForm.category.trim(),
-                    quantity: normalizedQuantity,
-                    unit: editForm.unit.trim(),
-                    storage: editForm.storage.trim(),
-                    status: editForm.status,
-                };
-            }),
-        );
-        handleEditDialogOpenChange(false);
+    const handleDeleteIngredient = (item: InventoryItem) => {
+        setDeletingItemId(item.id);
+        router.delete(`/inventory/ingredients/${item.id}`, {
+            preserveScroll: true,
+            onSuccess: () => toast.success('Ingredient deleted successfully.'),
+            onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+            onFinish: () => setDeletingItemId(null),
+        });
     };
 
     const isAddDisabled =
-        !addForm.name.trim() ||
-        !addForm.category.trim() ||
+        !normalizeName(addForm.name) ||
+        !addForm.categoryId ||
         !addForm.quantity.trim() ||
-        !addForm.unit.trim() ||
-        !addForm.storage.trim();
+        !addForm.unitId ||
+        !addForm.storageId;
     const isEditDisabled =
         editItemId === null ||
-        !editForm.name.trim() ||
-        !editForm.category.trim() ||
+        !normalizeName(editForm.name) ||
+        !editForm.categoryId ||
         !editForm.quantity.trim() ||
-        !editForm.unit.trim() ||
-        !editForm.storage.trim();
+        !editForm.unitId ||
+        !editForm.storageId;
 
     const goToPreviousPage = () => {
         setCurrentPage((page) => Math.max(1, page - 1));
@@ -546,17 +601,21 @@ export default function Inventory() {
                                         />
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <Label htmlFor="ingredient-category">
-                                            Category
-                                        </Label>
-                                        <Input
-                                            id="ingredient-category"
-                                            value={addForm.category}
-                                            onChange={handleAddFieldChange('category')}
-                                            placeholder="e.g. Produce"
-                                        />
-                                    </div>
+                                    <SearchableOptionField
+                                        id="ingredient-category"
+                                        label="Category"
+                                        value={addForm.categoryId}
+                                        options={categories}
+                                        placeholder="Select category"
+                                        searchPlaceholder="Search category..."
+                                        emptyLabel="No category found."
+                                        onValueChange={(value) =>
+                                            setAddForm((current) => ({
+                                                ...current,
+                                                categoryId: value,
+                                            }))
+                                        }
+                                    />
 
                                     <div className="space-y-2">
                                         <Label htmlFor="ingredient-quantity">
@@ -573,27 +632,37 @@ export default function Inventory() {
                                         />
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <Label htmlFor="ingredient-unit">Unit</Label>
-                                        <Input
-                                            id="ingredient-unit"
-                                            value={addForm.unit}
-                                            onChange={handleAddFieldChange('unit')}
-                                            placeholder="e.g. kg, L, pack"
-                                        />
-                                    </div>
+                                    <SearchableOptionField
+                                        id="ingredient-unit"
+                                        label="Unit"
+                                        value={addForm.unitId}
+                                        options={units}
+                                        placeholder="Select unit"
+                                        searchPlaceholder="Search unit..."
+                                        emptyLabel="No unit found."
+                                        onValueChange={(value) =>
+                                            setAddForm((current) => ({
+                                                ...current,
+                                                unitId: value,
+                                            }))
+                                        }
+                                    />
 
-                                    <div className="space-y-2">
-                                        <Label htmlFor="ingredient-storage">
-                                            Storage
-                                        </Label>
-                                        <Input
-                                            id="ingredient-storage"
-                                            value={addForm.storage}
-                                            onChange={handleAddFieldChange('storage')}
-                                            placeholder="e.g. Walk-in Cooler"
-                                        />
-                                    </div>
+                                    <SearchableOptionField
+                                        id="ingredient-storage"
+                                        label="Storage"
+                                        value={addForm.storageId}
+                                        options={storages}
+                                        placeholder="Select storage"
+                                        searchPlaceholder="Search storage..."
+                                        emptyLabel="No storage found."
+                                        onValueChange={(value) =>
+                                            setAddForm((current) => ({
+                                                ...current,
+                                                storageId: value,
+                                            }))
+                                        }
+                                    />
 
                                     <div className="relative space-y-2 sm:col-span-2" ref={addStatusMenuRef}>
                                         <Label htmlFor="ingredient-status">
@@ -681,7 +750,7 @@ export default function Inventory() {
                                     >
                                         Cancel
                                     </Button>
-                                    <Button type="submit" disabled={isAddDisabled}>
+                                    <Button type="submit" disabled={isAddDisabled || isAdding}>
                                         Save Ingredient
                                     </Button>
                                 </DialogFooter>
@@ -713,17 +782,21 @@ export default function Inventory() {
                                         />
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <Label htmlFor="edit-ingredient-category">
-                                            Category
-                                        </Label>
-                                        <Input
-                                            id="edit-ingredient-category"
-                                            value={editForm.category}
-                                            onChange={handleEditFieldChange('category')}
-                                            placeholder="e.g. Produce"
-                                        />
-                                    </div>
+                                    <SearchableOptionField
+                                        id="edit-ingredient-category"
+                                        label="Category"
+                                        value={editForm.categoryId}
+                                        options={categories}
+                                        placeholder="Select category"
+                                        searchPlaceholder="Search category..."
+                                        emptyLabel="No category found."
+                                        onValueChange={(value) =>
+                                            setEditForm((current) => ({
+                                                ...current,
+                                                categoryId: value,
+                                            }))
+                                        }
+                                    />
 
                                     <div className="space-y-2">
                                         <Label htmlFor="edit-ingredient-quantity">
@@ -740,27 +813,37 @@ export default function Inventory() {
                                         />
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <Label htmlFor="edit-ingredient-unit">Unit</Label>
-                                        <Input
-                                            id="edit-ingredient-unit"
-                                            value={editForm.unit}
-                                            onChange={handleEditFieldChange('unit')}
-                                            placeholder="e.g. kg, L, pack"
-                                        />
-                                    </div>
+                                    <SearchableOptionField
+                                        id="edit-ingredient-unit"
+                                        label="Unit"
+                                        value={editForm.unitId}
+                                        options={units}
+                                        placeholder="Select unit"
+                                        searchPlaceholder="Search unit..."
+                                        emptyLabel="No unit found."
+                                        onValueChange={(value) =>
+                                            setEditForm((current) => ({
+                                                ...current,
+                                                unitId: value,
+                                            }))
+                                        }
+                                    />
 
-                                    <div className="space-y-2">
-                                        <Label htmlFor="edit-ingredient-storage">
-                                            Storage
-                                        </Label>
-                                        <Input
-                                            id="edit-ingredient-storage"
-                                            value={editForm.storage}
-                                            onChange={handleEditFieldChange('storage')}
-                                            placeholder="e.g. Walk-in Cooler"
-                                        />
-                                    </div>
+                                    <SearchableOptionField
+                                        id="edit-ingredient-storage"
+                                        label="Storage"
+                                        value={editForm.storageId}
+                                        options={storages}
+                                        placeholder="Select storage"
+                                        searchPlaceholder="Search storage..."
+                                        emptyLabel="No storage found."
+                                        onValueChange={(value) =>
+                                            setEditForm((current) => ({
+                                                ...current,
+                                                storageId: value,
+                                            }))
+                                        }
+                                    />
 
                                     <div className="relative space-y-2 sm:col-span-2" ref={editStatusMenuRef}>
                                         <Label htmlFor="edit-ingredient-status">
@@ -848,7 +931,7 @@ export default function Inventory() {
                                     >
                                         Cancel
                                     </Button>
-                                    <Button type="submit" disabled={isEditDisabled}>
+                                    <Button type="submit" disabled={isEditDisabled || isEditing}>
                                         Save Changes
                                     </Button>
                                 </DialogFooter>
@@ -983,6 +1066,8 @@ export default function Inventory() {
                                                         size="icon"
                                                         className="size-8 text-destructive hover:text-destructive"
                                                         aria-label={`Delete ${item.name}`}
+                                                        onClick={() => handleDeleteIngredient(item)}
+                                                        disabled={deletingItemId === item.id}
                                                     >
                                                         <Trash2 className="size-4" />
                                                     </Button>
@@ -1044,6 +1129,8 @@ export default function Inventory() {
                                             variant="outline"
                                             size="sm"
                                             className="gap-1 text-destructive hover:text-destructive"
+                                            onClick={() => handleDeleteIngredient(item)}
+                                            disabled={deletingItemId === item.id}
                                         >
                                             <Trash2 className="size-3.5" />
                                             Delete

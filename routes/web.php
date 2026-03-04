@@ -1,13 +1,20 @@
 <?php
 
 use App\Http\Controllers\ManagementController;
+use App\Http\Controllers\InventoryController;
 use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/login')->name('home');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('dashboard', 'dashboard')->name('dashboard');
-    Route::inertia('inventory', 'inventory')->name('inventory');
+    Route::get('inventory', [InventoryController::class, 'index'])->name('inventory');
+    Route::post('inventory/ingredients', [InventoryController::class, 'storeIngredient'])
+        ->name('inventory.ingredients.store');
+    Route::put('inventory/ingredients/{ingredient}', [InventoryController::class, 'updateIngredient'])
+        ->name('inventory.ingredients.update');
+    Route::delete('inventory/ingredients/{ingredient}', [InventoryController::class, 'destroyIngredient'])
+        ->name('inventory.ingredients.destroy');
     Route::get('management', [ManagementController::class, 'index'])
         ->name('management');
     Route::post('management/users', [ManagementController::class, 'storeUser'])

@@ -85,4 +85,12 @@ class User extends Authenticatable
     {
         return $this->hasMany(Storage::class, 'created_by');
     }
+
+    /**
+     * Get ingredients created by this user.
+     */
+    public function ingredientsCreated(): HasMany
+    {
+        return $this->hasMany(Ingredient::class, 'created_by');
+    }
 }
