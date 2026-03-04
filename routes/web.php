@@ -18,6 +18,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->name('management.users.reset-password');
     Route::delete('management/users/{user}', [ManagementController::class, 'destroyUser'])
         ->name('management.users.destroy');
+    Route::post('management/categories', [ManagementController::class, 'storeCategory'])
+        ->name('management.categories.store');
+    Route::put('management/categories/{category}', [ManagementController::class, 'updateCategory'])
+        ->name('management.categories.update');
+    Route::delete('management/categories/{category}', [ManagementController::class, 'destroyCategory'])
+        ->name('management.categories.destroy');
 });
 
 require __DIR__.'/settings.php';

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Category;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
@@ -43,9 +44,23 @@ class ManagementController extends Controller
             ])
             ->values();
 
+        $categories = Category::query()
+            ->with('creator:id,name')
+            ->select(['id', 'name', 'created_by'])
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Category $category) => [
+                'id' => $category->id,
+                'name' => $category->name,
+                'created_by' => $category->created_by,
+                'created_by_name' => $category->creator?->name,
+            ])
+            ->values();
+
         return Inertia::render('management', [
             'roles' => $roles,
             'users' => $users,
+            'categories' => $categories,
         ]);
     }
 
@@ -112,6 +127,62 @@ class ManagementController extends Controller
         $user->update([
             'password' => Hash::make('apoy1234'),
         ]);
+
+        return to_route('management');
+    }
+
+    /**
+     * Create a category from management page.
+     */
+    public function storeCategory(Request $request): RedirectResponse
+    {
+        $request->merge([
+            'name' => trim((string) $request->input('name')),
+        ]);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255', 'unique:categories,name'],
+        ]);
+
+        Category::query()->create([
+            'name' => $validated['name'],
+            'created_by' => $request->user()?->id,
+        ]);
+
+        return to_route('management');
+    }
+
+    /**
+     * Update a category from management page.
+     */
+    public function updateCategory(Request $request, Category $category): RedirectResponse
+    {
+        $request->merge([
+            'name' => trim((string) $request->input('name')),
+        ]);
+
+        $validated = $request->validate([
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('categories', 'name')->ignore($category->id),
+            ],
+        ]);
+
+        $category->update([
+            'name' => $validated['name'],
+        ]);
+
+        return to_route('management');
+    }
+
+    /**
+     * Delete a category from management page.
+     */
+    public function destroyCategory(Category $category): RedirectResponse
+    {
+        $category->delete();
 
         return to_route('management');
     }

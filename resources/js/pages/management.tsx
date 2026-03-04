@@ -39,7 +39,7 @@ import { dashboard } from '@/routes';
 import type { BreadcrumbItem } from '@/types';
 
 type ManagementTab = 'account' | 'category' | 'unit' | 'storage';
-type LocalTab = Exclude<ManagementTab, 'account'>;
+type LocalTab = Exclude<ManagementTab, 'account' | 'category'>;
 
 type RoleOption = {
     id: number;
@@ -60,6 +60,13 @@ type LocalManagementItem = {
     name: string;
 };
 
+type CategoryItem = {
+    id: number;
+    name: string;
+    created_by: number | null;
+    created_by_name: string | null;
+};
+
 type AccountForm = {
     name: string;
     email: string;
@@ -69,6 +76,7 @@ type AccountForm = {
 type ManagementPageProps = {
     roles: RoleOption[];
     users: AccountUser[];
+    categories: CategoryItem[];
 };
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -101,7 +109,7 @@ const tabs: {
         label: 'Category',
         description: 'Define ingredient categories used in inventory.',
         inputLabel: 'Category name',
-        initialItems: ['Produce', 'Meat', 'Dry Goods'],
+        initialItems: [],
     },
     {
         value: 'unit',
@@ -127,7 +135,10 @@ const tabIcons = {
 } as const;
 
 const initialLocalTabItems = tabs
-    .filter((tab): tab is (typeof tabs)[number] & { value: LocalTab } => tab.value !== 'account')
+    .filter(
+        (tab): tab is (typeof tabs)[number] & { value: LocalTab } =>
+            tab.value !== 'account' && tab.value !== 'category',
+    )
     .reduce(
         (accumulator, tab) => {
             accumulator[tab.value] = tab.initialItems.map((name, index) => ({
@@ -172,11 +183,12 @@ const getRoleBadgeClassName = (roleSlug: string) => {
     return 'rounded-full border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-500/60 dark:bg-emerald-500/20 dark:text-emerald-200';
 };
 
-export default function Management({ roles, users }: ManagementPageProps) {
+export default function Management({ roles, users, categories }: ManagementPageProps) {
     const [activeTab, setActiveTab] = useState<ManagementTab>('account');
     const [localTabItems, setLocalTabItems] =
         useState<Record<LocalTab, LocalManagementItem[]>>(initialLocalTabItems);
     const [accountUsers, setAccountUsers] = useState<AccountUser[]>(users);
+    const [categoryItems, setCategoryItems] = useState<CategoryItem[]>(categories);
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [addLocalValue, setAddLocalValue] = useState('');
@@ -196,6 +208,7 @@ export default function Management({ roles, users }: ManagementPageProps) {
         role: 'employee',
     });
     const [editAccountUserId, setEditAccountUserId] = useState<number | null>(null);
+    const [editCategoryId, setEditCategoryId] = useState<number | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [resettingUserId, setResettingUserId] = useState<number | null>(null);
     const [accountSearch, setAccountSearch] = useState('');
@@ -205,6 +218,10 @@ export default function Management({ roles, users }: ManagementPageProps) {
     useEffect(() => {
         setAccountUsers(users);
     }, [users]);
+
+    useEffect(() => {
+        setCategoryItems(categories);
+    }, [categories]);
 
     const defaultRoleSlug = useMemo(() => {
         const employeeRole = roles.find((role) => role.slug === 'employee');
@@ -225,7 +242,9 @@ export default function Management({ roles, users }: ManagementPageProps) {
     );
     const ActiveIcon = tabIcons[activeTabData.value];
     const isAccountTab = activeTab === 'account';
-    const activeLocalItems = !isAccountTab ? localTabItems[activeTab] : [];
+    const isCategoryTab = activeTab === 'category';
+    const activeLocalItems =
+        !isAccountTab && !isCategoryTab ? localTabItems[activeTab] : [];
     const filteredAccountUsers = useMemo(() => {
         const query = accountSearch.trim().toLowerCase();
         if (!query) {
@@ -267,6 +286,7 @@ export default function Management({ roles, users }: ManagementPageProps) {
         setEditLocalValue('');
         setEditLocalTarget(null);
         setEditAccountUserId(null);
+        setEditCategoryId(null);
         setEditAccountForm({ name: '', email: '', role: defaultRoleSlug });
     };
 
@@ -286,10 +306,16 @@ export default function Management({ roles, users }: ManagementPageProps) {
     };
 
     const openEditLocalDialog = (item: LocalManagementItem) => {
-        if (activeTab === 'account') {
+        if (activeTab === 'account' || activeTab === 'category') {
             return;
         }
         setEditLocalTarget({ tab: activeTab, id: item.id });
+        setEditLocalValue(item.name);
+        setIsEditDialogOpen(true);
+    };
+
+    const openEditCategoryDialog = (item: CategoryItem) => {
+        setEditCategoryId(item.id);
         setEditLocalValue(item.name);
         setIsEditDialogOpen(true);
     };
@@ -313,6 +339,25 @@ export default function Management({ roles, users }: ManagementPageProps) {
                 preserveScroll: true,
                 onSuccess: () => {
                     toast.success('User created. Default password is set to apoy1234.');
+                    closeAddDialog();
+                },
+                onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+                onFinish: () => setIsSubmitting(false),
+            });
+            return;
+        }
+
+        if (isCategoryTab) {
+            const nextName = addLocalValue.trim();
+            if (!nextName) {
+                return;
+            }
+
+            setIsSubmitting(true);
+            router.post('/management/categories', { name: nextName }, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    toast.success('Category created successfully.');
                     closeAddDialog();
                 },
                 onError: (errors) => toast.error(getFirstErrorMessage(errors)),
@@ -359,6 +404,29 @@ export default function Management({ roles, users }: ManagementPageProps) {
             return;
         }
 
+        if (isCategoryTab) {
+            if (editCategoryId === null) {
+                return;
+            }
+
+            const nextName = editLocalValue.trim();
+            if (!nextName) {
+                return;
+            }
+
+            setIsSubmitting(true);
+            router.put(`/management/categories/${editCategoryId}`, { name: nextName }, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    toast.success('Category updated successfully.');
+                    closeEditDialog();
+                },
+                onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+                onFinish: () => setIsSubmitting(false),
+            });
+            return;
+        }
+
         if (!editLocalTarget) {
             return;
         }
@@ -378,7 +446,7 @@ export default function Management({ roles, users }: ManagementPageProps) {
     };
 
     const handleDeleteLocal = (id: number) => {
-        if (activeTab === 'account') {
+        if (activeTab === 'account' || activeTab === 'category') {
             return;
         }
         setLocalTabItems((current) => ({
@@ -412,6 +480,14 @@ export default function Management({ roles, users }: ManagementPageProps) {
         });
     };
 
+    const handleDeleteCategory = (id: number) => {
+        router.delete(`/management/categories/${id}`, {
+            preserveScroll: true,
+            onSuccess: () => toast.success('Category deleted successfully.'),
+            onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+        });
+    };
+
     const isAddDisabled = isAccountTab
         ? !addAccountForm.name.trim() ||
           !addAccountForm.email.trim() ||
@@ -423,7 +499,9 @@ export default function Management({ roles, users }: ManagementPageProps) {
           !editAccountForm.name.trim() ||
           !editAccountForm.email.trim() ||
           !editAccountForm.role
-        : !editLocalValue.trim() || !editLocalTarget;
+        : isCategoryTab
+          ? editCategoryId === null || !editLocalValue.trim()
+          : !editLocalValue.trim() || !editLocalTarget;
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -636,6 +714,94 @@ export default function Management({ roles, users }: ManagementPageProps) {
                                                                             onClick={() =>
                                                                                 handleDeleteAccount(
                                                                                     user.id,
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            <Trash2 className="size-4" />
+                                                                        </Button>
+                                                                    </TooltipTrigger>
+                                                                    <TooltipContent>
+                                                                        Delete
+                                                                    </TooltipContent>
+                                                                </Tooltip>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </>
+                                ) : isCategoryTab ? (
+                                    <>
+                                        <thead className="bg-muted/40 text-left">
+                                            <tr>
+                                                <th className="px-4 py-3 font-medium">
+                                                    Category
+                                                </th>
+                                                <th className="px-4 py-3 font-medium">
+                                                    Added by
+                                                </th>
+                                                <th className="px-4 py-3 text-right font-medium">
+                                                    Action
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {categoryItems.length === 0 ? (
+                                                <tr>
+                                                    <td
+                                                        colSpan={3}
+                                                        className="px-4 py-8 text-center text-muted-foreground"
+                                                    >
+                                                        No category entries found.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                categoryItems.map((item) => (
+                                                    <tr
+                                                        key={item.id}
+                                                        className="border-t border-border/70"
+                                                    >
+                                                        <td className="px-4 py-3">
+                                                            {item.name}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-muted-foreground">
+                                                            {item.created_by_name ?? 'System'}
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <div className="flex items-center justify-end gap-2">
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="size-8"
+                                                                            aria-label={`Edit ${item.name}`}
+                                                                            onClick={() =>
+                                                                                openEditCategoryDialog(
+                                                                                    item,
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            <Pencil className="size-4" />
+                                                                        </Button>
+                                                                    </TooltipTrigger>
+                                                                    <TooltipContent>
+                                                                        Edit
+                                                                    </TooltipContent>
+                                                                </Tooltip>
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="size-8 text-destructive hover:text-destructive"
+                                                                            aria-label={`Delete ${item.name}`}
+                                                                            onClick={() =>
+                                                                                handleDeleteCategory(
+                                                                                    item.id,
                                                                                 )
                                                                             }
                                                                         >
