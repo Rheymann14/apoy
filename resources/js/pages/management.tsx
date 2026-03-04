@@ -73,6 +73,12 @@ type AccountForm = {
     role: string;
 };
 
+type DeleteDialogTarget = {
+    type: 'account' | 'category';
+    id: number;
+    name: string;
+};
+
 type ManagementPageProps = {
     roles: RoleOption[];
     users: AccountUser[];
@@ -214,6 +220,13 @@ export default function Management({ roles, users, categories }: ManagementPageP
     const [accountSearch, setAccountSearch] = useState('');
     const [accountPage, setAccountPage] = useState(1);
     const [accountPageSize, setAccountPageSize] = useState(10);
+    const [categorySearch, setCategorySearch] = useState('');
+    const [categoryPage, setCategoryPage] = useState(1);
+    const [categoryPageSize, setCategoryPageSize] = useState(10);
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [deleteDialogTarget, setDeleteDialogTarget] =
+        useState<DeleteDialogTarget | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         setAccountUsers(users);
@@ -270,10 +283,39 @@ export default function Management({ roles, users, categories }: ManagementPageP
         filteredAccountUsers.length === 0
             ? 0
             : Math.min(accountPage * accountPageSize, filteredAccountUsers.length);
+    const filteredCategoryItems = useMemo(() => {
+        const query = categorySearch.trim().toLowerCase();
+        if (!query) {
+            return categoryItems;
+        }
+
+        return categoryItems.filter((item) => {
+            const searchable = `${item.name} ${item.created_by_name ?? ''}`.toLowerCase();
+            return searchable.includes(query);
+        });
+    }, [categoryItems, categorySearch]);
+    const totalCategoryPages = useMemo(
+        () => Math.max(1, Math.ceil(filteredCategoryItems.length / categoryPageSize)),
+        [filteredCategoryItems.length, categoryPageSize],
+    );
+    const paginatedCategoryItems = useMemo(() => {
+        const startIndex = (categoryPage - 1) * categoryPageSize;
+        return filteredCategoryItems.slice(startIndex, startIndex + categoryPageSize);
+    }, [filteredCategoryItems, categoryPage, categoryPageSize]);
+    const categoryEntryStart =
+        filteredCategoryItems.length === 0 ? 0 : (categoryPage - 1) * categoryPageSize + 1;
+    const categoryEntryEnd =
+        filteredCategoryItems.length === 0
+            ? 0
+            : Math.min(categoryPage * categoryPageSize, filteredCategoryItems.length);
 
     useEffect(() => {
         setAccountPage((currentPage) => Math.min(currentPage, totalAccountPages));
     }, [totalAccountPages]);
+
+    useEffect(() => {
+        setCategoryPage((currentPage) => Math.min(currentPage, totalCategoryPages));
+    }, [totalCategoryPages]);
 
     const closeAddDialog = () => {
         setIsAddDialogOpen(false);
@@ -288,6 +330,11 @@ export default function Management({ roles, users, categories }: ManagementPageP
         setEditAccountUserId(null);
         setEditCategoryId(null);
         setEditAccountForm({ name: '', email: '', role: defaultRoleSlug });
+    };
+
+    const closeDeleteDialog = () => {
+        setIsDeleteDialogOpen(false);
+        setDeleteDialogTarget(null);
     };
 
     const handleTabChange = (tab: ManagementTab) => {
@@ -455,12 +502,9 @@ export default function Management({ roles, users, categories }: ManagementPageP
         }));
     };
 
-    const handleDeleteAccount = (id: number) => {
-        router.delete(`/management/users/${id}`, {
-            preserveScroll: true,
-            onSuccess: () => toast.success('User deleted successfully.'),
-            onError: (errors) => toast.error(getFirstErrorMessage(errors)),
-        });
+    const openDeleteDialog = (target: DeleteDialogTarget) => {
+        setDeleteDialogTarget(target);
+        setIsDeleteDialogOpen(true);
     };
 
     const handleResetPassword = (id: number) => {
@@ -480,11 +524,30 @@ export default function Management({ roles, users, categories }: ManagementPageP
         });
     };
 
-    const handleDeleteCategory = (id: number) => {
-        router.delete(`/management/categories/${id}`, {
+    const handleConfirmDelete = () => {
+        if (!deleteDialogTarget) {
+            return;
+        }
+
+        setIsDeleting(true);
+
+        const endpoint =
+            deleteDialogTarget.type === 'account'
+                ? `/management/users/${deleteDialogTarget.id}`
+                : `/management/categories/${deleteDialogTarget.id}`;
+        const successMessage =
+            deleteDialogTarget.type === 'account'
+                ? 'User deleted successfully.'
+                : 'Category deleted successfully.';
+
+        router.delete(endpoint, {
             preserveScroll: true,
-            onSuccess: () => toast.success('Category deleted successfully.'),
+            onSuccess: () => {
+                toast.success(successMessage);
+                closeDeleteDialog();
+            },
             onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+            onFinish: () => setIsDeleting(false),
         });
     };
 
@@ -575,6 +638,34 @@ export default function Management({ roles, users, categories }: ManagementPageP
                                         onChange={(event) => {
                                             setAccountPageSize(Number(event.target.value));
                                             setAccountPage(1);
+                                        }}
+                                        className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
+                                    >
+                                        <option value={10}>10</option>
+                                        <option value={50}>50</option>
+                                        <option value={100}>100</option>
+                                    </select>
+                                    <span>entries</span>
+                                </div>
+                            </div>
+                        ) : isCategoryTab ? (
+                            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <Input
+                                    value={categorySearch}
+                                    onChange={(event) => {
+                                        setCategorySearch(event.target.value);
+                                        setCategoryPage(1);
+                                    }}
+                                    placeholder="Search category or added by..."
+                                    className="sm:max-w-sm"
+                                />
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <span>Show</span>
+                                    <select
+                                        value={categoryPageSize}
+                                        onChange={(event) => {
+                                            setCategoryPageSize(Number(event.target.value));
+                                            setCategoryPage(1);
                                         }}
                                         className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
                                     >
@@ -712,9 +803,11 @@ export default function Management({ roles, users, categories }: ManagementPageP
                                                                             className="size-8 text-destructive hover:text-destructive"
                                                                             aria-label={`Delete ${user.name}`}
                                                                             onClick={() =>
-                                                                                handleDeleteAccount(
-                                                                                    user.id,
-                                                                                )
+                                                                                openDeleteDialog({
+                                                                                    type: 'account',
+                                                                                    id: user.id,
+                                                                                    name: user.name,
+                                                                                })
                                                                             }
                                                                         >
                                                                             <Trash2 className="size-4" />
@@ -756,8 +849,17 @@ export default function Management({ roles, users, categories }: ManagementPageP
                                                         No category entries found.
                                                     </td>
                                                 </tr>
+                                            ) : filteredCategoryItems.length === 0 ? (
+                                                <tr>
+                                                    <td
+                                                        colSpan={3}
+                                                        className="px-4 py-8 text-center text-muted-foreground"
+                                                    >
+                                                        No matching categories found.
+                                                    </td>
+                                                </tr>
                                             ) : (
-                                                categoryItems.map((item) => (
+                                                paginatedCategoryItems.map((item) => (
                                                     <tr
                                                         key={item.id}
                                                         className="border-t border-border/70"
@@ -800,9 +902,11 @@ export default function Management({ roles, users, categories }: ManagementPageP
                                                                             className="size-8 text-destructive hover:text-destructive"
                                                                             aria-label={`Delete ${item.name}`}
                                                                             onClick={() =>
-                                                                                handleDeleteCategory(
-                                                                                    item.id,
-                                                                                )
+                                                                                openDeleteDialog({
+                                                                                    type: 'category',
+                                                                                    id: item.id,
+                                                                                    name: item.name,
+                                                                                })
                                                                             }
                                                                         >
                                                                             <Trash2 className="size-4" />
@@ -938,6 +1042,45 @@ export default function Management({ roles, users, categories }: ManagementPageP
                                             )
                                         }
                                         disabled={accountPage >= totalAccountPages}
+                                    >
+                                        Next
+                                    </Button>
+                                </div>
+                            </div>
+                        ) : isCategoryTab && categoryItems.length > 0 ? (
+                            <div className="mt-3 flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                                <p>
+                                    Showing {categoryEntryStart} to {categoryEntryEnd} of{' '}
+                                    {filteredCategoryItems.length} entries
+                                </p>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() =>
+                                            setCategoryPage((currentPage) =>
+                                                Math.max(currentPage - 1, 1),
+                                            )
+                                        }
+                                        disabled={categoryPage <= 1}
+                                    >
+                                        Previous
+                                    </Button>
+                                    <span className="min-w-24 text-center">
+                                        Page {categoryPage} of {totalCategoryPages}
+                                    </span>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() =>
+                                            setCategoryPage((currentPage) =>
+                                                Math.min(
+                                                    currentPage + 1,
+                                                    totalCategoryPages,
+                                                ),
+                                            )
+                                        }
+                                        disabled={categoryPage >= totalCategoryPages}
                                     >
                                         Next
                                     </Button>
@@ -1153,6 +1296,56 @@ export default function Management({ roles, users, categories }: ManagementPageP
                             </Button>
                         </DialogFooter>
                     </form>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={isDeleteDialogOpen}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        closeDeleteDialog();
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>
+                            Delete{' '}
+                            {deleteDialogTarget?.type === 'account'
+                                ? 'Account'
+                                : 'Category'}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {deleteDialogTarget
+                                ? `Would you like to delete ${deleteDialogTarget.name}?`
+                                : 'Would you like to delete this item?'}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={closeDeleteDialog}
+                            disabled={isDeleting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={handleConfirmDelete}
+                            disabled={isDeleting || !deleteDialogTarget}
+                        >
+                            {isDeleting ? (
+                                <>
+                                    <Loader2 className="mr-2 size-4 animate-spin" />
+                                    Deleting...
+                                </>
+                            ) : (
+                                'Delete'
+                            )}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </AppLayout>
