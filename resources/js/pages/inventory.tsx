@@ -4,6 +4,7 @@ import {
     ChevronLeft,
     ChevronRight,
     ChevronsUpDown,
+    Loader2,
     Package,
     Pencil,
     Plus,
@@ -27,6 +28,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import AppLayout from '@/layouts/app-layout';
 import { cn } from '@/lib/utils';
 import { dashboard, inventory } from '@/routes';
@@ -51,6 +53,7 @@ type InventoryItem = {
     storage_id: number;
     storage: string;
     status: InventoryStatus;
+    created_by_name: string | null;
 };
 
 type IngredientForm = {
@@ -67,6 +70,11 @@ type InventoryPageProps = {
     units: InventoryOption[];
     storages: InventoryOption[];
     ingredients: InventoryItem[];
+};
+
+type DeleteDialogTarget = {
+    id: number;
+    name: string;
 };
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -306,6 +314,8 @@ export default function Inventory({
     const [editStatusSearch, setEditStatusSearch] = useState('');
     const editStatusMenuRef = useRef<HTMLDivElement | null>(null);
     const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<DeleteDialogTarget | null>(null);
 
     useEffect(() => {
         setItems(ingredients);
@@ -388,6 +398,16 @@ export default function Inventory({
     const handleSearchChange = (value: string) => {
         setSearch(value);
         setCurrentPage(1);
+    };
+
+    const openDeleteDialog = (item: InventoryItem) => {
+        setDeleteTarget({ id: item.id, name: item.name });
+        setIsDeleteDialogOpen(true);
+    };
+
+    const closeDeleteDialog = () => {
+        setIsDeleteDialogOpen(false);
+        setDeleteTarget(null);
     };
 
     const handleEntriesPerPageChange = (
@@ -523,11 +543,18 @@ export default function Inventory({
         });
     };
 
-    const handleDeleteIngredient = (item: InventoryItem) => {
-        setDeletingItemId(item.id);
-        router.delete(`/inventory/ingredients/${item.id}`, {
+    const handleDeleteIngredient = () => {
+        if (!deleteTarget) {
+            return;
+        }
+
+        setDeletingItemId(deleteTarget.id);
+        router.delete(`/inventory/ingredients/${deleteTarget.id}`, {
             preserveScroll: true,
-            onSuccess: () => toast.success('Ingredient deleted successfully.'),
+            onSuccess: () => {
+                toast.success('Ingredient deleted successfully.');
+                closeDeleteDialog();
+            },
             onError: (errors) => toast.error(getFirstErrorMessage(errors)),
             onFinish: () => setDeletingItemId(null),
         });
@@ -747,11 +774,19 @@ export default function Inventory({
                                         onClick={() =>
                                             handleAddDialogOpenChange(false)
                                         }
+                                        disabled={isAdding}
                                     >
                                         Cancel
                                     </Button>
                                     <Button type="submit" disabled={isAddDisabled || isAdding}>
-                                        Save Ingredient
+                                        {isAdding ? (
+                                            <>
+                                                <Loader2 className="mr-2 size-4 animate-spin" />
+                                                Saving ingredient...
+                                            </>
+                                        ) : (
+                                            'Save Ingredient'
+                                        )}
                                     </Button>
                                 </DialogFooter>
                             </form>
@@ -928,11 +963,19 @@ export default function Inventory({
                                         onClick={() =>
                                             handleEditDialogOpenChange(false)
                                         }
+                                        disabled={isEditing}
                                     >
                                         Cancel
                                     </Button>
                                     <Button type="submit" disabled={isEditDisabled || isEditing}>
-                                        Save Changes
+                                        {isEditing ? (
+                                            <>
+                                                <Loader2 className="mr-2 size-4 animate-spin" />
+                                                Saving changes...
+                                            </>
+                                        ) : (
+                                            'Save Changes'
+                                        )}
                                     </Button>
                                 </DialogFooter>
                             </form>
@@ -1000,6 +1043,9 @@ export default function Inventory({
                                     <th className="px-4 py-3 font-medium">
                                         Status
                                     </th>
+                                    <th className="px-4 py-3 font-medium">
+                                        Added by
+                                    </th>
                                     <th className="px-4 py-3 text-right font-medium">
                                         Action
                                     </th>
@@ -1009,7 +1055,7 @@ export default function Inventory({
                                 {paginatedItems.length === 0 ? (
                                     <tr>
                                         <td
-                                            colSpan={9}
+                                            colSpan={10}
                                             className="px-4 py-8 text-center text-muted-foreground"
                                         >
                                             No ingredient matched your
@@ -1048,29 +1094,46 @@ export default function Inventory({
                                             <td className="px-4 py-3">
                                                 {getStatusBadge(item.status)}
                                             </td>
+                                            <td className="px-4 py-3 text-muted-foreground">
+                                                {item.created_by_name ?? 'System'}
+                                            </td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center justify-end gap-2">
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="size-8"
-                                                        aria-label={`Edit ${item.name}`}
-                                                        onClick={() => openEditDialog(item)}
-                                                    >
-                                                        <Pencil className="size-4" />
-                                                    </Button>
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="size-8 text-destructive hover:text-destructive"
-                                                        aria-label={`Delete ${item.name}`}
-                                                        onClick={() => handleDeleteIngredient(item)}
-                                                        disabled={deletingItemId === item.id}
-                                                    >
-                                                        <Trash2 className="size-4" />
-                                                    </Button>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                type="button"
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="size-8"
+                                                                aria-label={`Edit ${item.name}`}
+                                                                onClick={() => openEditDialog(item)}
+                                                            >
+                                                                <Pencil className="size-4" />
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>
+                                                            Edit
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                type="button"
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="size-8 text-destructive hover:text-destructive"
+                                                                aria-label={`Delete ${item.name}`}
+                                                                onClick={() => openDeleteDialog(item)}
+                                                                disabled={deletingItemId === item.id}
+                                                            >
+                                                                <Trash2 className="size-4" />
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>
+                                                            Delete
+                                                        </TooltipContent>
+                                                    </Tooltip>
                                                 </div>
                                             </td>
                                         </tr>
@@ -1112,29 +1175,42 @@ export default function Inventory({
                                         <p>Qty: {item.quantity}</p>
                                         <p>Unit: {item.unit}</p>
                                         <p>Storage: {item.storage}</p>
+                                        <p className="col-span-2">
+                                            Added by: {item.created_by_name ?? 'System'}
+                                        </p>
                                     </div>
                                     <div className="mt-4 flex justify-end gap-2">
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            className="gap-1"
-                                            onClick={() => openEditDialog(item)}
-                                        >
-                                            <Pencil className="size-3.5" />
-                                            Edit
-                                        </Button>
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            className="gap-1 text-destructive hover:text-destructive"
-                                            onClick={() => handleDeleteIngredient(item)}
-                                            disabled={deletingItemId === item.id}
-                                        >
-                                            <Trash2 className="size-3.5" />
-                                            Delete
-                                        </Button>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="gap-1"
+                                                    onClick={() => openEditDialog(item)}
+                                                >
+                                                    <Pencil className="size-3.5" />
+                                                    Edit
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Edit</TooltipContent>
+                                        </Tooltip>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="gap-1 text-destructive hover:text-destructive"
+                                                    onClick={() => openDeleteDialog(item)}
+                                                    disabled={deletingItemId === item.id}
+                                                >
+                                                    <Trash2 className="size-3.5" />
+                                                    Delete
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Delete</TooltipContent>
+                                        </Tooltip>
                                     </div>
                                 </div>
                             ))
@@ -1176,6 +1252,51 @@ export default function Inventory({
                     </div>
                 </CardContent>
             </Card>
+
+            <Dialog
+                open={isDeleteDialogOpen}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        closeDeleteDialog();
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Delete Ingredient</DialogTitle>
+                        <DialogDescription>
+                            {deleteTarget
+                                ? `Would you like to delete ${deleteTarget.name}?`
+                                : 'Would you like to delete this ingredient?'}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={closeDeleteDialog}
+                            disabled={deletingItemId !== null}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={handleDeleteIngredient}
+                            disabled={deletingItemId !== null || !deleteTarget}
+                        >
+                            {deletingItemId !== null ? (
+                                <>
+                                    <Loader2 className="mr-2 size-4 animate-spin" />
+                                    Deleting...
+                                </>
+                            ) : (
+                                'Delete'
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </AppLayout>
     );
 }

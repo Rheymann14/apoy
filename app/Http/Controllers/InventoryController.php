@@ -58,6 +58,7 @@ class InventoryController extends Controller
                 'category:id,name',
                 'unit:id,name',
                 'storage:id,name',
+                'creator:id,name',
             ])
             ->select([
                 'id',
@@ -68,6 +69,7 @@ class InventoryController extends Controller
                 'unit_id',
                 'storage_id',
                 'status',
+                'created_by',
             ])
             ->orderByDesc('id')
             ->get()
@@ -83,6 +85,7 @@ class InventoryController extends Controller
                 'storage_id' => $ingredient->storage_id,
                 'storage' => $ingredient->storage?->name ?? '',
                 'status' => $ingredient->status,
+                'created_by_name' => $ingredient->creator?->name,
             ])
             ->values();
 
