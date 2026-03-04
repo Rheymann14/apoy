@@ -69,4 +69,20 @@ class User extends Authenticatable
     {
         return $this->hasMany(Category::class, 'created_by');
     }
+
+    /**
+     * Get units created by this user.
+     */
+    public function unitsCreated(): HasMany
+    {
+        return $this->hasMany(Unit::class, 'created_by');
+    }
+
+    /**
+     * Get storages created by this user.
+     */
+    public function storagesCreated(): HasMany
+    {
+        return $this->hasMany(Storage::class, 'created_by');
+    }
 }

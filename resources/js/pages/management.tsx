@@ -58,9 +58,25 @@ type AccountUser = {
 type LocalManagementItem = {
     id: number;
     name: string;
+    created_by: number | null;
+    created_by_name: string | null;
 };
 
 type CategoryItem = {
+    id: number;
+    name: string;
+    created_by: number | null;
+    created_by_name: string | null;
+};
+
+type UnitItem = {
+    id: number;
+    name: string;
+    created_by: number | null;
+    created_by_name: string | null;
+};
+
+type StorageItem = {
     id: number;
     name: string;
     created_by: number | null;
@@ -74,7 +90,7 @@ type AccountForm = {
 };
 
 type DeleteDialogTarget = {
-    type: 'account' | 'category';
+    type: 'account' | 'category' | 'unit' | 'storage';
     id: number;
     name: string;
 };
@@ -83,6 +99,8 @@ type ManagementPageProps = {
     roles: RoleOption[];
     users: AccountUser[];
     categories: CategoryItem[];
+    units: UnitItem[];
+    storages: StorageItem[];
 };
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -122,14 +140,14 @@ const tabs: {
         label: 'Unit',
         description: 'Maintain measurement units for item quantities.',
         inputLabel: 'Unit name',
-        initialItems: ['kg', 'L', 'pack'],
+        initialItems: [],
     },
     {
         value: 'storage',
         label: 'Storage',
         description: 'Configure storage areas and stock locations.',
         inputLabel: 'Storage name',
-        initialItems: ['Walk-in Cooler', 'Freezer A', 'Dry Storage'],
+        initialItems: [],
     },
 ];
 
@@ -139,22 +157,6 @@ const tabIcons = {
     unit: Ruler,
     storage: Building2,
 } as const;
-
-const initialLocalTabItems = tabs
-    .filter(
-        (tab): tab is (typeof tabs)[number] & { value: LocalTab } =>
-            tab.value !== 'account' && tab.value !== 'category',
-    )
-    .reduce(
-        (accumulator, tab) => {
-            accumulator[tab.value] = tab.initialItems.map((name, index) => ({
-                id: index + 1,
-                name,
-            }));
-            return accumulator;
-        },
-        {} as Record<LocalTab, LocalManagementItem[]>,
-    );
 
 const getFirstErrorMessage = (errors: unknown) => {
     if (!errors || typeof errors !== 'object') {
@@ -189,10 +191,29 @@ const getRoleBadgeClassName = (roleSlug: string) => {
     return 'rounded-full border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-500/60 dark:bg-emerald-500/20 dark:text-emerald-200';
 };
 
-export default function Management({ roles, users, categories }: ManagementPageProps) {
+export default function Management({
+    roles,
+    users,
+    categories,
+    units,
+    storages,
+}: ManagementPageProps) {
     const [activeTab, setActiveTab] = useState<ManagementTab>('account');
     const [localTabItems, setLocalTabItems] =
-        useState<Record<LocalTab, LocalManagementItem[]>>(initialLocalTabItems);
+        useState<Record<LocalTab, LocalManagementItem[]>>({
+            unit: units.map(({ id, name, created_by, created_by_name }) => ({
+                id,
+                name,
+                created_by,
+                created_by_name,
+            })),
+            storage: storages.map(({ id, name, created_by, created_by_name }) => ({
+                id,
+                name,
+                created_by,
+                created_by_name,
+            })),
+        });
     const [accountUsers, setAccountUsers] = useState<AccountUser[]>(users);
     const [categoryItems, setCategoryItems] = useState<CategoryItem[]>(categories);
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -223,6 +244,12 @@ export default function Management({ roles, users, categories }: ManagementPageP
     const [categorySearch, setCategorySearch] = useState('');
     const [categoryPage, setCategoryPage] = useState(1);
     const [categoryPageSize, setCategoryPageSize] = useState(10);
+    const [unitSearch, setUnitSearch] = useState('');
+    const [unitPage, setUnitPage] = useState(1);
+    const [unitPageSize, setUnitPageSize] = useState(10);
+    const [storageSearch, setStorageSearch] = useState('');
+    const [storagePage, setStoragePage] = useState(1);
+    const [storagePageSize, setStoragePageSize] = useState(10);
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [deleteDialogTarget, setDeleteDialogTarget] =
         useState<DeleteDialogTarget | null>(null);
@@ -235,6 +262,23 @@ export default function Management({ roles, users, categories }: ManagementPageP
     useEffect(() => {
         setCategoryItems(categories);
     }, [categories]);
+
+    useEffect(() => {
+        setLocalTabItems({
+            unit: units.map(({ id, name, created_by, created_by_name }) => ({
+                id,
+                name,
+                created_by,
+                created_by_name,
+            })),
+            storage: storages.map(({ id, name, created_by, created_by_name }) => ({
+                id,
+                name,
+                created_by,
+                created_by_name,
+            })),
+        });
+    }, [units, storages]);
 
     const defaultRoleSlug = useMemo(() => {
         const employeeRole = roles.find((role) => role.slug === 'employee');
@@ -256,8 +300,8 @@ export default function Management({ roles, users, categories }: ManagementPageP
     const ActiveIcon = tabIcons[activeTabData.value];
     const isAccountTab = activeTab === 'account';
     const isCategoryTab = activeTab === 'category';
-    const activeLocalItems =
-        !isAccountTab && !isCategoryTab ? localTabItems[activeTab] : [];
+    const isUnitTab = activeTab === 'unit';
+    const isStorageTab = activeTab === 'storage';
     const filteredAccountUsers = useMemo(() => {
         const query = accountSearch.trim().toLowerCase();
         if (!query) {
@@ -308,6 +352,80 @@ export default function Management({ roles, users, categories }: ManagementPageP
         filteredCategoryItems.length === 0
             ? 0
             : Math.min(categoryPage * categoryPageSize, filteredCategoryItems.length);
+    const filteredUnitItems = useMemo(() => {
+        const query = unitSearch.trim().toLowerCase();
+        if (!query) {
+            return localTabItems.unit;
+        }
+
+        return localTabItems.unit.filter((item) => {
+            const searchable = `${item.name} ${item.created_by_name ?? ''}`.toLowerCase();
+            return searchable.includes(query);
+        });
+    }, [localTabItems.unit, unitSearch]);
+    const totalUnitPages = useMemo(
+        () => Math.max(1, Math.ceil(filteredUnitItems.length / unitPageSize)),
+        [filteredUnitItems.length, unitPageSize],
+    );
+    const paginatedUnitItems = useMemo(() => {
+        const startIndex = (unitPage - 1) * unitPageSize;
+        return filteredUnitItems.slice(startIndex, startIndex + unitPageSize);
+    }, [filteredUnitItems, unitPage, unitPageSize]);
+    const unitEntryStart =
+        filteredUnitItems.length === 0 ? 0 : (unitPage - 1) * unitPageSize + 1;
+    const unitEntryEnd =
+        filteredUnitItems.length === 0
+            ? 0
+            : Math.min(unitPage * unitPageSize, filteredUnitItems.length);
+    const filteredStorageItems = useMemo(() => {
+        const query = storageSearch.trim().toLowerCase();
+        if (!query) {
+            return localTabItems.storage;
+        }
+
+        return localTabItems.storage.filter((item) => {
+            const searchable = `${item.name} ${item.created_by_name ?? ''}`.toLowerCase();
+            return searchable.includes(query);
+        });
+    }, [localTabItems.storage, storageSearch]);
+    const totalStoragePages = useMemo(
+        () => Math.max(1, Math.ceil(filteredStorageItems.length / storagePageSize)),
+        [filteredStorageItems.length, storagePageSize],
+    );
+    const paginatedStorageItems = useMemo(() => {
+        const startIndex = (storagePage - 1) * storagePageSize;
+        return filteredStorageItems.slice(startIndex, startIndex + storagePageSize);
+    }, [filteredStorageItems, storagePage, storagePageSize]);
+    const storageEntryStart =
+        filteredStorageItems.length === 0 ? 0 : (storagePage - 1) * storagePageSize + 1;
+    const storageEntryEnd =
+        filteredStorageItems.length === 0
+            ? 0
+            : Math.min(storagePage * storagePageSize, filteredStorageItems.length);
+    const activeLocalItems = isUnitTab
+        ? paginatedUnitItems
+        : isStorageTab
+          ? paginatedStorageItems
+          : [];
+    const totalActiveLocalItems =
+        isUnitTab ? localTabItems.unit.length : isStorageTab ? localTabItems.storage.length : 0;
+    const filteredActiveLocalItems =
+        isUnitTab ? filteredUnitItems : isStorageTab ? filteredStorageItems : [];
+    const activeLocalPage = isUnitTab ? unitPage : storagePage;
+    const activeLocalTotalPages = isUnitTab ? totalUnitPages : totalStoragePages;
+    const activeLocalEntryStart =
+        filteredActiveLocalItems.length === 0
+            ? 0
+            : (activeLocalPage - 1) *
+                  (isUnitTab ? unitPageSize : storagePageSize) +
+              1;
+    const activeLocalEntryEnd =
+        filteredActiveLocalItems.length === 0
+            ? 0
+            : Math.min(
+                  activeLocalPage * (isUnitTab ? unitPageSize : storagePageSize),
+                  filteredActiveLocalItems.length,
+              );
 
     useEffect(() => {
         setAccountPage((currentPage) => Math.min(currentPage, totalAccountPages));
@@ -316,6 +434,14 @@ export default function Management({ roles, users, categories }: ManagementPageP
     useEffect(() => {
         setCategoryPage((currentPage) => Math.min(currentPage, totalCategoryPages));
     }, [totalCategoryPages]);
+
+    useEffect(() => {
+        setUnitPage((currentPage) => Math.min(currentPage, totalUnitPages));
+    }, [totalUnitPages]);
+
+    useEffect(() => {
+        setStoragePage((currentPage) => Math.min(currentPage, totalStoragePages));
+    }, [totalStoragePages]);
 
     const closeAddDialog = () => {
         setIsAddDialogOpen(false);
@@ -418,16 +544,20 @@ export default function Management({ roles, users, categories }: ManagementPageP
             return;
         }
 
-        setLocalTabItems((current) => {
-            const nextId =
-                current[activeTab].reduce((maxId, item) => Math.max(maxId, item.id), 0) + 1;
+        const endpoint =
+            activeTab === 'unit' ? '/management/units' : '/management/storages';
+        const itemLabel = activeTab === 'unit' ? 'Unit' : 'Storage';
 
-            return {
-                ...current,
-                [activeTab]: [{ id: nextId, name: nextName }, ...current[activeTab]],
-            };
+        setIsSubmitting(true);
+        router.post(endpoint, { name: nextName }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                toast.success(`${itemLabel} created successfully.`);
+                closeAddDialog();
+            },
+            onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+            onFinish: () => setIsSubmitting(false),
         });
-        closeAddDialog();
     };
 
     const handleEdit = (event: FormEvent<HTMLFormElement>) => {
@@ -483,23 +613,22 @@ export default function Management({ roles, users, categories }: ManagementPageP
             return;
         }
 
-        setLocalTabItems((current) => ({
-            ...current,
-            [editLocalTarget.tab]: current[editLocalTarget.tab].map((item) =>
-                item.id === editLocalTarget.id ? { ...item, name: nextName } : item,
-            ),
-        }));
-        closeEditDialog();
-    };
+        const endpoint =
+            editLocalTarget.tab === 'unit'
+                ? `/management/units/${editLocalTarget.id}`
+                : `/management/storages/${editLocalTarget.id}`;
+        const itemLabel = editLocalTarget.tab === 'unit' ? 'Unit' : 'Storage';
 
-    const handleDeleteLocal = (id: number) => {
-        if (activeTab === 'account' || activeTab === 'category') {
-            return;
-        }
-        setLocalTabItems((current) => ({
-            ...current,
-            [activeTab]: current[activeTab].filter((item) => item.id !== id),
-        }));
+        setIsSubmitting(true);
+        router.put(endpoint, { name: nextName }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                toast.success(`${itemLabel} updated successfully.`);
+                closeEditDialog();
+            },
+            onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+            onFinish: () => setIsSubmitting(false),
+        });
     };
 
     const openDeleteDialog = (target: DeleteDialogTarget) => {
@@ -534,11 +663,19 @@ export default function Management({ roles, users, categories }: ManagementPageP
         const endpoint =
             deleteDialogTarget.type === 'account'
                 ? `/management/users/${deleteDialogTarget.id}`
-                : `/management/categories/${deleteDialogTarget.id}`;
+                : deleteDialogTarget.type === 'category'
+                  ? `/management/categories/${deleteDialogTarget.id}`
+                  : deleteDialogTarget.type === 'unit'
+                    ? `/management/units/${deleteDialogTarget.id}`
+                    : `/management/storages/${deleteDialogTarget.id}`;
         const successMessage =
             deleteDialogTarget.type === 'account'
                 ? 'User deleted successfully.'
-                : 'Category deleted successfully.';
+                : deleteDialogTarget.type === 'category'
+                  ? 'Category deleted successfully.'
+                  : deleteDialogTarget.type === 'unit'
+                    ? 'Unit deleted successfully.'
+                    : 'Storage deleted successfully.';
 
         router.delete(endpoint, {
             preserveScroll: true,
@@ -666,6 +803,62 @@ export default function Management({ roles, users, categories }: ManagementPageP
                                         onChange={(event) => {
                                             setCategoryPageSize(Number(event.target.value));
                                             setCategoryPage(1);
+                                        }}
+                                        className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
+                                    >
+                                        <option value={10}>10</option>
+                                        <option value={50}>50</option>
+                                        <option value={100}>100</option>
+                                    </select>
+                                    <span>entries</span>
+                                </div>
+                            </div>
+                        ) : isUnitTab ? (
+                            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <Input
+                                    value={unitSearch}
+                                    onChange={(event) => {
+                                        setUnitSearch(event.target.value);
+                                        setUnitPage(1);
+                                    }}
+                                    placeholder="Search unit or added by..."
+                                    className="sm:max-w-sm"
+                                />
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <span>Show</span>
+                                    <select
+                                        value={unitPageSize}
+                                        onChange={(event) => {
+                                            setUnitPageSize(Number(event.target.value));
+                                            setUnitPage(1);
+                                        }}
+                                        className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
+                                    >
+                                        <option value={10}>10</option>
+                                        <option value={50}>50</option>
+                                        <option value={100}>100</option>
+                                    </select>
+                                    <span>entries</span>
+                                </div>
+                            </div>
+                        ) : isStorageTab ? (
+                            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <Input
+                                    value={storageSearch}
+                                    onChange={(event) => {
+                                        setStorageSearch(event.target.value);
+                                        setStoragePage(1);
+                                    }}
+                                    placeholder="Search storage or added by..."
+                                    className="sm:max-w-sm"
+                                />
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <span>Show</span>
+                                    <select
+                                        value={storagePageSize}
+                                        onChange={(event) => {
+                                            setStoragePageSize(Number(event.target.value));
+                                            setStoragePage(1);
                                         }}
                                         className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
                                     >
@@ -930,19 +1123,31 @@ export default function Management({ roles, users, categories }: ManagementPageP
                                                 <th className="px-4 py-3 font-medium">
                                                     {activeTabData.label}
                                                 </th>
+                                                <th className="px-4 py-3 font-medium">
+                                                    Added by
+                                                </th>
                                                 <th className="px-4 py-3 text-right font-medium">
                                                     Action
                                                 </th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {activeLocalItems.length === 0 ? (
+                                            {totalActiveLocalItems === 0 ? (
                                                 <tr>
                                                     <td
-                                                        colSpan={2}
+                                                        colSpan={3}
                                                         className="px-4 py-8 text-center text-muted-foreground"
                                                     >
                                                         No {activeTabData.label.toLowerCase()} entries found.
+                                                    </td>
+                                                </tr>
+                                            ) : filteredActiveLocalItems.length === 0 ? (
+                                                <tr>
+                                                    <td
+                                                        colSpan={3}
+                                                        className="px-4 py-8 text-center text-muted-foreground"
+                                                    >
+                                                        No matching {activeTabData.label.toLowerCase()} found.
                                                     </td>
                                                 </tr>
                                             ) : (
@@ -953,6 +1158,9 @@ export default function Management({ roles, users, categories }: ManagementPageP
                                                     >
                                                         <td className="px-4 py-3">
                                                             {item.name}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-muted-foreground">
+                                                            {item.created_by_name ?? 'System'}
                                                         </td>
                                                         <td className="px-4 py-3">
                                                             <div className="flex items-center justify-end gap-2">
@@ -986,9 +1194,11 @@ export default function Management({ roles, users, categories }: ManagementPageP
                                                                             className="size-8 text-destructive hover:text-destructive"
                                                                             aria-label={`Delete ${item.name}`}
                                                                             onClick={() =>
-                                                                                handleDeleteLocal(
-                                                                                    item.id,
-                                                                                )
+                                                                                openDeleteDialog({
+                                                                                    type: activeTab,
+                                                                                    id: item.id,
+                                                                                    name: item.name,
+                                                                                })
                                                                             }
                                                                         >
                                                                             <Trash2 className="size-4" />
@@ -1081,6 +1291,62 @@ export default function Management({ roles, users, categories }: ManagementPageP
                                             )
                                         }
                                         disabled={categoryPage >= totalCategoryPages}
+                                    >
+                                        Next
+                                    </Button>
+                                </div>
+                            </div>
+                        ) : (isUnitTab || isStorageTab) && totalActiveLocalItems > 0 ? (
+                            <div className="mt-3 flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                                <p>
+                                    Showing {activeLocalEntryStart} to {activeLocalEntryEnd} of{' '}
+                                    {filteredActiveLocalItems.length} entries
+                                </p>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() => {
+                                            if (isUnitTab) {
+                                                setUnitPage((currentPage) =>
+                                                    Math.max(currentPage - 1, 1),
+                                                );
+                                                return;
+                                            }
+
+                                            setStoragePage((currentPage) =>
+                                                Math.max(currentPage - 1, 1),
+                                            );
+                                        }}
+                                        disabled={activeLocalPage <= 1}
+                                    >
+                                        Previous
+                                    </Button>
+                                    <span className="min-w-24 text-center">
+                                        Page {activeLocalPage} of {activeLocalTotalPages}
+                                    </span>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() => {
+                                            if (isUnitTab) {
+                                                setUnitPage((currentPage) =>
+                                                    Math.min(
+                                                        currentPage + 1,
+                                                        activeLocalTotalPages,
+                                                    ),
+                                                );
+                                                return;
+                                            }
+
+                                            setStoragePage((currentPage) =>
+                                                Math.min(
+                                                    currentPage + 1,
+                                                    activeLocalTotalPages,
+                                                ),
+                                            );
+                                        }}
+                                        disabled={activeLocalPage >= activeLocalTotalPages}
                                     >
                                         Next
                                     </Button>
@@ -1313,7 +1579,11 @@ export default function Management({ roles, users, categories }: ManagementPageP
                             Delete{' '}
                             {deleteDialogTarget?.type === 'account'
                                 ? 'Account'
-                                : 'Category'}
+                                : deleteDialogTarget?.type === 'category'
+                                  ? 'Category'
+                                  : deleteDialogTarget?.type === 'unit'
+                                    ? 'Unit'
+                                    : 'Storage'}
                         </DialogTitle>
                         <DialogDescription>
                             {deleteDialogTarget

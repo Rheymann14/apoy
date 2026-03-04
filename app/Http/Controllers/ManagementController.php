@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Category;
 use App\Models\Role;
+use App\Models\Storage;
+use App\Models\Unit;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -57,10 +59,38 @@ class ManagementController extends Controller
             ])
             ->values();
 
+        $units = Unit::query()
+            ->with('creator:id,name')
+            ->select(['id', 'name', 'created_by'])
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Unit $unit) => [
+                'id' => $unit->id,
+                'name' => $unit->name,
+                'created_by' => $unit->created_by,
+                'created_by_name' => $unit->creator?->name,
+            ])
+            ->values();
+
+        $storages = Storage::query()
+            ->with('creator:id,name')
+            ->select(['id', 'name', 'created_by'])
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Storage $storage) => [
+                'id' => $storage->id,
+                'name' => $storage->name,
+                'created_by' => $storage->created_by,
+                'created_by_name' => $storage->creator?->name,
+            ])
+            ->values();
+
         return Inertia::render('management', [
             'roles' => $roles,
             'users' => $users,
             'categories' => $categories,
+            'units' => $units,
+            'storages' => $storages,
         ]);
     }
 
@@ -183,6 +213,118 @@ class ManagementController extends Controller
     public function destroyCategory(Category $category): RedirectResponse
     {
         $category->delete();
+
+        return to_route('management');
+    }
+
+    /**
+     * Create a unit from management page.
+     */
+    public function storeUnit(Request $request): RedirectResponse
+    {
+        $request->merge([
+            'name' => trim((string) $request->input('name')),
+        ]);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255', 'unique:units,name'],
+        ]);
+
+        Unit::query()->create([
+            'name' => $validated['name'],
+            'created_by' => $request->user()?->id,
+        ]);
+
+        return to_route('management');
+    }
+
+    /**
+     * Update a unit from management page.
+     */
+    public function updateUnit(Request $request, Unit $unit): RedirectResponse
+    {
+        $request->merge([
+            'name' => trim((string) $request->input('name')),
+        ]);
+
+        $validated = $request->validate([
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('units', 'name')->ignore($unit->id),
+            ],
+        ]);
+
+        $unit->update([
+            'name' => $validated['name'],
+        ]);
+
+        return to_route('management');
+    }
+
+    /**
+     * Delete a unit from management page.
+     */
+    public function destroyUnit(Unit $unit): RedirectResponse
+    {
+        $unit->delete();
+
+        return to_route('management');
+    }
+
+    /**
+     * Create a storage from management page.
+     */
+    public function storeStorage(Request $request): RedirectResponse
+    {
+        $request->merge([
+            'name' => trim((string) $request->input('name')),
+        ]);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255', 'unique:storages,name'],
+        ]);
+
+        Storage::query()->create([
+            'name' => $validated['name'],
+            'created_by' => $request->user()?->id,
+        ]);
+
+        return to_route('management');
+    }
+
+    /**
+     * Update a storage from management page.
+     */
+    public function updateStorage(Request $request, Storage $storage): RedirectResponse
+    {
+        $request->merge([
+            'name' => trim((string) $request->input('name')),
+        ]);
+
+        $validated = $request->validate([
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('storages', 'name')->ignore($storage->id),
+            ],
+        ]);
+
+        $storage->update([
+            'name' => $validated['name'],
+        ]);
+
+        return to_route('management');
+    }
+
+    /**
+     * Delete a storage from management page.
+     */
+    public function destroyStorage(Storage $storage): RedirectResponse
+    {
+        $storage->delete();
 
         return to_route('management');
     }

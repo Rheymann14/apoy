@@ -24,6 +24,18 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->name('management.categories.update');
     Route::delete('management/categories/{category}', [ManagementController::class, 'destroyCategory'])
         ->name('management.categories.destroy');
+    Route::post('management/units', [ManagementController::class, 'storeUnit'])
+        ->name('management.units.store');
+    Route::put('management/units/{unit}', [ManagementController::class, 'updateUnit'])
+        ->name('management.units.update');
+    Route::delete('management/units/{unit}', [ManagementController::class, 'destroyUnit'])
+        ->name('management.units.destroy');
+    Route::post('management/storages', [ManagementController::class, 'storeStorage'])
+        ->name('management.storages.store');
+    Route::put('management/storages/{storage}', [ManagementController::class, 'updateStorage'])
+        ->name('management.storages.update');
+    Route::delete('management/storages/{storage}', [ManagementController::class, 'destroyStorage'])
+        ->name('management.storages.destroy');
 });
 
 require __DIR__.'/settings.php';
