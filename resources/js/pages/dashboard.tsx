@@ -2,15 +2,18 @@ import { Head, Link, router } from '@inertiajs/react';
 import {
     ArrowRight,
     Boxes,
+    GripVertical,
     Layers,
     PackageCheck,
     PackageX,
     TriangleAlert,
     Users,
     Warehouse,
+    RotateCcw,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEventHandler } from 'react';
+import Sortable from 'sortablejs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -88,6 +91,166 @@ const dashboardRealtimeKeys = [
 ] as const;
 const dashboardRefreshIntervalMs = 5000;
 
+type TopCardId =
+    | 'total_ingredients'
+    | 'in_stock'
+    | 'low_stock'
+    | 'out_of_stock';
+type SummaryCardId = 'categories' | 'storages' | 'users';
+type PrimaryInsightCardId = 'new_ingredients' | 'stock_distribution';
+type SecondaryInsightCardId = 'top_categories' | 'recent_additions';
+type MetricCardId = TopCardId | SummaryCardId;
+type InsightCardId = PrimaryInsightCardId | SecondaryInsightCardId;
+
+const defaultTopCardOrder: TopCardId[] = [
+    'total_ingredients',
+    'in_stock',
+    'low_stock',
+    'out_of_stock',
+];
+const defaultSummaryCardOrder: SummaryCardId[] = [
+    'categories',
+    'storages',
+    'users',
+];
+const defaultPrimaryInsightOrder: PrimaryInsightCardId[] = [
+    'new_ingredients',
+    'stock_distribution',
+];
+const defaultSecondaryInsightOrder: SecondaryInsightCardId[] = [
+    'top_categories',
+    'recent_additions',
+];
+const defaultMetricCardOrder: MetricCardId[] = [
+    ...defaultTopCardOrder,
+    ...defaultSummaryCardOrder,
+];
+const defaultInsightCardOrder: InsightCardId[] = [
+    ...defaultPrimaryInsightOrder,
+    ...defaultSecondaryInsightOrder,
+];
+const metricCardOrderStorageKey = 'dashboard.metric-card-order.v1';
+const insightCardOrderStorageKey = 'dashboard.insight-card-order.v1';
+
+const areCardOrdersEqual = <T extends string>(
+    current: readonly T[],
+    expected: readonly T[],
+) =>
+    current.length === expected.length &&
+    current.every((cardId, index) => cardId === expected[index]);
+
+const orderCardsById = <T extends { id: string }>(
+    cards: readonly T[],
+    order: readonly string[],
+) => {
+    const cardMap = new Map(cards.map((card) => [card.id, card]));
+    const orderedCards = order
+        .map((cardId) => cardMap.get(cardId))
+        .filter((card): card is T => card !== undefined);
+
+    if (orderedCards.length === cards.length) {
+        return orderedCards;
+    }
+
+    const remainingCards = cards.filter((card) => !order.includes(card.id));
+    return [...orderedCards, ...remainingCards];
+};
+
+const readCardOrderFromContainer = <T extends string>(
+    container: HTMLDivElement,
+    validIds: readonly T[],
+) => {
+    const validIdSet = new Set(validIds);
+
+    return Array.from(container.children)
+        .map((child) => child.getAttribute('data-card-id'))
+        .filter(
+            (cardId): cardId is T =>
+                cardId !== null && validIdSet.has(cardId as T),
+        );
+};
+
+const getStoredCardOrder = <T extends string>(
+    storageKey: string,
+    validIds: readonly T[],
+) => {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+
+    try {
+        const raw = window.localStorage.getItem(storageKey);
+        if (!raw) {
+            return null;
+        }
+
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+            return null;
+        }
+
+        const validIdSet = new Set(validIds);
+        const normalized = parsed.filter(
+            (item): item is T =>
+                typeof item === 'string' && validIdSet.has(item as T),
+        );
+
+        if (
+            normalized.length !== validIds.length ||
+            new Set(normalized).size !== validIds.length
+        ) {
+            return null;
+        }
+
+        return normalized;
+    } catch {
+        return null;
+    }
+};
+
+const persistCardOrder = <T extends string>(
+    storageKey: string,
+    currentOrder: readonly T[],
+    defaultOrder: readonly T[],
+) => {
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    if (areCardOrdersEqual(currentOrder, defaultOrder)) {
+        window.localStorage.removeItem(storageKey);
+        return;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(currentOrder));
+};
+
+const draggingCardClasses = [
+    'ring-2',
+    'ring-emerald-300/60',
+    'dark:ring-emerald-500/40',
+    'bg-emerald-50/40',
+    'dark:bg-emerald-950/20',
+    'shadow-lg',
+] as const;
+
+const getDraggableCardElement = (item: HTMLElement) =>
+    (item.querySelector('[data-dashboard-card]') as HTMLElement | null) ?? item;
+
+const toggleDraggingCardHighlight = (
+    item: HTMLElement,
+    shouldHighlight: boolean,
+) => {
+    const cardElement = getDraggableCardElement(item);
+
+    if (shouldHighlight) {
+        cardElement.classList.add(...draggingCardClasses);
+        return;
+    }
+
+    cardElement.classList.remove(...draggingCardClasses);
+};
+
 const formatCount = (value: number) => new Intl.NumberFormat().format(value);
 
 const toPercentLabel = (value: number, total: number) => {
@@ -154,12 +317,17 @@ type TrendChartProps = {
 function TrendChart({ data }: TrendChartProps) {
     const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
     const chartData = data.length > 0 ? data : [{ label: 'N/A', value: 0 }];
-    const width = 620;
+    const width = Math.max(620, chartData.length * 72);
     const height = 210;
     const xStart = 26;
     const xEnd = width - 26;
     const yTop = 16;
     const yBottom = height - 30;
+    const maxVisibleLabels = 10;
+    const labelStep = Math.max(
+        1,
+        Math.ceil(chartData.length / maxVisibleLabels),
+    );
     const maxValue = Math.max(1, ...chartData.map((point) => point.value));
     const stepX =
         chartData.length > 1 ? (xEnd - xStart) / (chartData.length - 1) : 0;
@@ -171,6 +339,8 @@ function TrendChart({ data }: TrendChartProps) {
     }));
     const hoveredPoint =
         points.find((point) => point.label === hoveredLabel) ?? null;
+    const isTooltipBelowPoint =
+        hoveredPoint !== null && hoveredPoint.y < yTop + 26;
 
     const linePath = points
         .map(
@@ -185,112 +355,133 @@ function TrendChart({ data }: TrendChartProps) {
 
     return (
         <div className="space-y-2">
-            <div className="relative">
-                <svg viewBox={`0 0 ${width} ${height}`} className="h-52 w-full">
-                    <defs>
-                        <linearGradient
-                            id="dailyTrendFill"
-                            x1="0"
-                            y1="0"
-                            x2="0"
-                            y2="1"
-                        >
-                            <stop
-                                offset="0%"
-                                stopColor="#7aa99a"
-                                stopOpacity="0.35"
-                            />
-                            <stop
-                                offset="100%"
-                                stopColor="#7aa99a"
-                                stopOpacity="0.02"
-                            />
-                        </linearGradient>
-                    </defs>
+            <div className="overflow-x-auto pb-1">
+                <div
+                    className="relative min-w-full"
+                    style={{ width: `${width}px` }}
+                >
+                    <svg
+                        viewBox={`0 0 ${width} ${height}`}
+                        className="h-52 w-full"
+                    >
+                        <defs>
+                            <linearGradient
+                                id="dailyTrendFill"
+                                x1="0"
+                                y1="0"
+                                x2="0"
+                                y2="1"
+                            >
+                                <stop
+                                    offset="0%"
+                                    stopColor="#7aa99a"
+                                    stopOpacity="0.35"
+                                />
+                                <stop
+                                    offset="100%"
+                                    stopColor="#7aa99a"
+                                    stopOpacity="0.02"
+                                />
+                            </linearGradient>
+                        </defs>
 
-                    {Array.from({ length: 4 }).map((_, index) => {
-                        const y = yTop + ((yBottom - yTop) * index) / 3;
-                        return (
+                        {Array.from({ length: 4 }).map((_, index) => {
+                            const y = yTop + ((yBottom - yTop) * index) / 3;
+                            return (
+                                <line
+                                    key={index}
+                                    x1={xStart}
+                                    y1={y}
+                                    x2={xEnd}
+                                    y2={y}
+                                    stroke="currentColor"
+                                    strokeOpacity={0.12}
+                                    strokeWidth={1}
+                                />
+                            );
+                        })}
+
+                        {hoveredPoint && (
                             <line
-                                key={index}
-                                x1={xStart}
-                                y1={y}
-                                x2={xEnd}
-                                y2={y}
-                                stroke="currentColor"
-                                strokeOpacity={0.12}
-                                strokeWidth={1}
+                                x1={hoveredPoint.x}
+                                y1={yTop}
+                                x2={hoveredPoint.x}
+                                y2={yBottom}
+                                stroke="#5d8f80"
+                                strokeOpacity={0.3}
+                                strokeDasharray="4 4"
                             />
-                        );
-                    })}
+                        )}
+
+                        <path d={areaPath} fill="url(#dailyTrendFill)" />
+                        <path
+                            d={linePath}
+                            fill="none"
+                            stroke="#5d8f80"
+                            strokeWidth={2.4}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                        />
+                        {points.map((point) => {
+                            const isHovered = hoveredLabel === point.label;
+                            return (
+                                <g key={point.label}>
+                                    <circle
+                                        cx={point.x}
+                                        cy={point.y}
+                                        r={isHovered ? 4.5 : 3}
+                                        fill={isHovered ? '#5d8f80' : '#ffffff'}
+                                        stroke="#5d8f80"
+                                        strokeWidth={2}
+                                    />
+                                    <circle
+                                        cx={point.x}
+                                        cy={point.y}
+                                        r={12}
+                                        fill="transparent"
+                                        onMouseEnter={() =>
+                                            setHoveredLabel(point.label)
+                                        }
+                                        onMouseLeave={() =>
+                                            setHoveredLabel(null)
+                                        }
+                                    />
+                                </g>
+                            );
+                        })}
+                    </svg>
 
                     {hoveredPoint && (
-                        <line
-                            x1={hoveredPoint.x}
-                            y1={yTop}
-                            x2={hoveredPoint.x}
-                            y2={yBottom}
-                            stroke="#5d8f80"
-                            strokeOpacity={0.3}
-                            strokeDasharray="4 4"
-                        />
+                        <div
+                            className="pointer-events-none absolute z-10 rounded-md border border-border/70 bg-card/95 px-2 py-1 text-xs shadow-sm"
+                            style={{
+                                left: `${(hoveredPoint.x / width) * 100}%`,
+                                top: `${Math.max(
+                                    8,
+                                    ((hoveredPoint.y +
+                                        (isTooltipBelowPoint ? 14 : -12)) /
+                                        height) *
+                                        100,
+                                )}%`,
+                                transform: isTooltipBelowPoint
+                                    ? 'translate(-50%, 0)'
+                                    : 'translate(-50%, -100%)',
+                            }}
+                        >
+                            <p className="font-medium">{hoveredPoint.label}</p>
+                            <p className="text-muted-foreground">
+                                {formatCount(hoveredPoint.value)} added
+                            </p>
+                        </div>
                     )}
-
-                    <path d={areaPath} fill="url(#dailyTrendFill)" />
-                    <path
-                        d={linePath}
-                        fill="none"
-                        stroke="#5d8f80"
-                        strokeWidth={2.4}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                    />
-                    {points.map((point) => {
-                        const isHovered = hoveredLabel === point.label;
-                        return (
-                            <g key={point.label}>
-                                <circle
-                                    cx={point.x}
-                                    cy={point.y}
-                                    r={isHovered ? 4.5 : 3}
-                                    fill={isHovered ? '#5d8f80' : '#ffffff'}
-                                    stroke="#5d8f80"
-                                    strokeWidth={2}
-                                />
-                                <circle
-                                    cx={point.x}
-                                    cy={point.y}
-                                    r={12}
-                                    fill="transparent"
-                                    onMouseEnter={() =>
-                                        setHoveredLabel(point.label)
-                                    }
-                                    onMouseLeave={() => setHoveredLabel(null)}
-                                />
-                            </g>
-                        );
-                    })}
-                </svg>
-
-                {hoveredPoint && (
-                    <div
-                        className="pointer-events-none absolute z-10 rounded-md border border-border/70 bg-card/95 px-2 py-1 text-xs shadow-sm"
-                        style={{
-                            left: `${(hoveredPoint.x / width) * 100}%`,
-                            top: `${Math.max(8, ((hoveredPoint.y - 12) / height) * 100)}%`,
-                            transform: 'translate(-50%, -100%)',
-                        }}
-                    >
-                        <p className="font-medium">{hoveredPoint.label}</p>
-                        <p className="text-muted-foreground">
-                            {formatCount(hoveredPoint.value)} added
-                        </p>
-                    </div>
-                )}
+                </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-                {chartData.map((point) => (
+            <div
+                className="flex items-center justify-between text-xs text-muted-foreground"
+                style={{ width: `${width}px`, minWidth: '100%' }}
+            >
+                {chartData.map((point, index) => (
                     <span
                         key={point.label}
                         className={
@@ -299,7 +490,10 @@ function TrendChart({ data }: TrendChartProps) {
                                 : 'text-muted-foreground'
                         }
                     >
-                        {point.label}
+                        {index % labelStep === 0 ||
+                        index === chartData.length - 1
+                            ? point.label
+                            : '\u00A0'}
                     </span>
                 ))}
             </div>
@@ -395,8 +589,8 @@ function StatusDonutChart({ data, total }: StatusDonutChartProps) {
     };
 
     return (
-        <div className="space-y-4">
-            <div className="relative mx-auto size-44">
+        <div className="flex h-full min-h-0 flex-col gap-4">
+            <div className="relative mx-auto size-40 shrink-0 sm:size-44">
                 <div
                     className="relative size-full rounded-full transition-shadow duration-200"
                     style={{
@@ -441,7 +635,7 @@ function StatusDonutChart({ data, total }: StatusDonutChartProps) {
                 )}
             </div>
 
-            <div className="space-y-2">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {data.map((item) => {
                     const segment = segmentByLabel.get(item.label) ?? null;
                     const isHovered = hoveredSegment?.label === item.label;
@@ -494,13 +688,17 @@ function CategoryBars({ data }: CategoryBarsProps) {
     const maxValue = Math.max(1, ...data.map((item) => item.value));
 
     return (
-        <div className="space-y-3">
+        <div
+            className={`space-y-3 ${
+                data.length > 6 ? 'max-h-64 overflow-y-auto pr-1' : ''
+            }`}
+        >
             {data.map((item, index) => {
                 const width = (item.value / maxValue) * 100;
                 return (
                     <div key={item.label} className="space-y-1">
                         <div className="flex items-center justify-between text-sm">
-                            <span>{item.label}</span>
+                            <span className="truncate pr-3">{item.label}</span>
                             <span className="text-muted-foreground">
                                 {formatCount(item.value)}
                             </span>
@@ -531,6 +729,23 @@ export default function Dashboard({
     categoryChart,
     recentIngredients,
 }: DashboardPageProps) {
+    const metricCardsRef = useRef<HTMLDivElement | null>(null);
+    const insightCardsRef = useRef<HTMLDivElement | null>(null);
+    const [metricCardOrder, setMetricCardOrder] = useState<MetricCardId[]>(
+        () =>
+            getStoredCardOrder(
+                metricCardOrderStorageKey,
+                defaultMetricCardOrder,
+            ) ?? defaultMetricCardOrder,
+    );
+    const [insightCardOrder, setInsightCardOrder] = useState<InsightCardId[]>(
+        () =>
+            getStoredCardOrder(
+                insightCardOrderStorageKey,
+                defaultInsightCardOrder,
+            ) ?? defaultInsightCardOrder,
+    );
+
     useEffect(() => {
         let isReloading = false;
 
@@ -569,41 +784,257 @@ export default function Dashboard({
         };
     }, []);
 
+    useEffect(() => {
+        const container = metricCardsRef.current;
+        if (!container) {
+            return;
+        }
+
+        const sortable = Sortable.create(container, {
+            animation: 170,
+            draggable: '[data-card-id]',
+            handle: '[data-drag-handle]',
+            ghostClass: 'opacity-70',
+            swapThreshold: 0.65,
+            invertSwap: true,
+            onChoose: (event) => {
+                toggleDraggingCardHighlight(event.item, true);
+            },
+            onEnd: (event) => {
+                toggleDraggingCardHighlight(event.item, false);
+                const newOrder = readCardOrderFromContainer(
+                    container,
+                    defaultMetricCardOrder,
+                );
+
+                if (newOrder.length === defaultMetricCardOrder.length) {
+                    setMetricCardOrder(newOrder);
+                }
+            },
+        });
+
+        return () => sortable.destroy();
+    }, []);
+
+    useEffect(() => {
+        const container = insightCardsRef.current;
+        if (!container) {
+            return;
+        }
+
+        const sortable = Sortable.create(container, {
+            animation: 170,
+            draggable: '[data-card-id]',
+            handle: '[data-drag-handle]',
+            ghostClass: 'opacity-70',
+            swapThreshold: 0.65,
+            invertSwap: true,
+            onChoose: (event) => {
+                toggleDraggingCardHighlight(event.item, true);
+            },
+            onEnd: (event) => {
+                toggleDraggingCardHighlight(event.item, false);
+                const newOrder = readCardOrderFromContainer(
+                    container,
+                    defaultInsightCardOrder,
+                );
+
+                if (newOrder.length === defaultInsightCardOrder.length) {
+                    setInsightCardOrder(newOrder);
+                }
+            },
+        });
+
+        return () => sortable.destroy();
+    }, []);
+
+    useEffect(() => {
+        persistCardOrder(
+            metricCardOrderStorageKey,
+            metricCardOrder,
+            defaultMetricCardOrder,
+        );
+    }, [metricCardOrder]);
+
+    useEffect(() => {
+        persistCardOrder(
+            insightCardOrderStorageKey,
+            insightCardOrder,
+            defaultInsightCardOrder,
+        );
+    }, [insightCardOrder]);
+
     const totalTrackedStatuses =
         counts.in_stock + counts.low_stock + counts.out_of_stock;
-    const topCards = [
+    const metricCards = [
         {
+            id: 'total_ingredients' as const,
+            variant: 'stock' as const,
             title: 'Total Ingredients',
-            value: counts.total_ingredients,
+            value: formatCount(counts.total_ingredients),
             description: `${formatCount(counts.total_quantity)} combined quantity`,
             icon: Boxes,
             tone: 'text-foreground',
+            cardClassName: 'sm:col-span-2 lg:col-span-3',
         },
         {
+            id: 'in_stock' as const,
+            variant: 'stock' as const,
             title: 'In Stock',
-            value: counts.in_stock,
+            value: formatCount(counts.in_stock),
             description: toPercentLabel(counts.in_stock, totalTrackedStatuses),
             icon: PackageCheck,
             tone: 'text-emerald-700 dark:text-emerald-300',
+            cardClassName: 'lg:col-span-1',
         },
         {
+            id: 'low_stock' as const,
+            variant: 'stock' as const,
             title: 'Low Stock',
-            value: counts.low_stock,
+            value: formatCount(counts.low_stock),
             description: toPercentLabel(counts.low_stock, totalTrackedStatuses),
             icon: TriangleAlert,
             tone: 'text-amber-700 dark:text-amber-300',
+            cardClassName: 'lg:col-span-1',
         },
         {
+            id: 'out_of_stock' as const,
+            variant: 'stock' as const,
             title: 'Out of Stock',
-            value: counts.out_of_stock,
+            value: formatCount(counts.out_of_stock),
             description: toPercentLabel(
                 counts.out_of_stock,
                 totalTrackedStatuses,
             ),
             icon: PackageX,
             tone: 'text-rose-700 dark:text-rose-300',
+            cardClassName: 'lg:col-span-1',
+        },
+        {
+            id: 'categories' as const,
+            variant: 'summary' as const,
+            title: 'Categories',
+            value: formatCount(counts.total_categories),
+            description: 'Configured ingredient groups',
+            icon: Layers,
+            tone: 'text-foreground',
+            cardClassName: 'sm:col-span-2 lg:col-span-2',
+        },
+        {
+            id: 'storages' as const,
+            variant: 'summary' as const,
+            title: 'Storage Areas',
+            value: formatCount(counts.total_storages),
+            description: 'Active inventory locations',
+            icon: Warehouse,
+            tone: 'text-foreground',
+            cardClassName: 'sm:col-span-2 lg:col-span-2',
+        },
+        {
+            id: 'users' as const,
+            variant: 'summary' as const,
+            title: 'Users',
+            value: formatCount(counts.total_users),
+            description: 'Accounts with system access',
+            icon: Users,
+            tone: 'text-foreground',
+            cardClassName: 'sm:col-span-2 lg:col-span-2',
         },
     ] as const;
+    const orderedMetricCards = orderCardsById(metricCards, metricCardOrder);
+
+    const insightCards = [
+        {
+            id: 'new_ingredients' as const,
+            title: 'New Ingredients (Last 7 Days)',
+            description: 'Daily additions trend for recent inventory intake.',
+            cardClassName: 'lg:col-span-2 xl:col-span-8',
+            panelClassName: 'min-h-[22rem] lg:h-[24rem]',
+            content: (
+                <CardContent className="flex-1 pb-3">
+                    <TrendChart data={dailyAdded} />
+                </CardContent>
+            ),
+        },
+        {
+            id: 'stock_distribution' as const,
+            title: 'Stock Distribution',
+            description: 'Share of items by stock status.',
+            cardClassName: 'xl:col-span-4',
+            panelClassName: 'min-h-[22rem] lg:h-[24rem]',
+            content: (
+                <CardContent className="flex h-full min-h-0 flex-1">
+                    <StatusDonutChart
+                        data={statusChart}
+                        total={counts.total_ingredients}
+                    />
+                </CardContent>
+            ),
+        },
+        {
+            id: 'top_categories' as const,
+            title: 'Top Categories by Item Count',
+            description:
+                'Highest-volume categories based on current inventory.',
+            cardClassName: 'lg:col-span-2 xl:col-span-8',
+            panelClassName: 'min-h-[22rem] lg:h-[24rem]',
+            content: (
+                <CardContent className="flex-1 overflow-hidden">
+                    <CategoryBars data={categoryChart} />
+                </CardContent>
+            ),
+        },
+        {
+            id: 'recent_additions' as const,
+            title: 'Recent Additions',
+            description: 'Latest ingredient records in the system.',
+            cardClassName: 'xl:col-span-4',
+            panelClassName: 'min-h-[22rem] lg:h-[24rem]',
+            content: (
+                <CardContent className="flex-1 space-y-2.5 overflow-y-auto pr-1">
+                    {recentIngredients.length === 0 ? (
+                        <p className="rounded-md border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
+                            No ingredient records yet.
+                        </p>
+                    ) : (
+                        recentIngredients.map((ingredient) => (
+                            <div
+                                key={ingredient.id}
+                                className="rounded-lg border border-border/70 p-3"
+                            >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium">
+                                            {ingredient.name}
+                                        </p>
+                                        <p className="truncate text-xs text-muted-foreground">
+                                            {ingredient.code}
+                                        </p>
+                                    </div>
+                                    {getStatusBadge(ingredient.status)}
+                                </div>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                    {ingredient.category} - {ingredient.storage}
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    {ingredient.created_at_human ?? 'Just now'}
+                                </p>
+                            </div>
+                        ))
+                    )}
+                </CardContent>
+            ),
+        },
+    ] as const;
+    const orderedInsightCards = orderCardsById(insightCards, insightCardOrder);
+    const isDefaultCardLayout =
+        areCardOrdersEqual(metricCardOrder, defaultMetricCardOrder) &&
+        areCardOrdersEqual(insightCardOrder, defaultInsightCardOrder);
+
+    const handleResetCardLayout = () => {
+        setMetricCardOrder(defaultMetricCardOrder);
+        setInsightCardOrder(defaultInsightCardOrder);
+    };
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -622,7 +1053,22 @@ export default function Dashboard({
                             </CardDescription>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          
+                            <Badge
+                                variant="secondary"
+                                className="rounded-full px-3 py-1 text-xs"
+                            >
+                                Drag to Arrange
+                            </Badge>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleResetCardLayout}
+                                disabled={isDefaultCardLayout}
+                            >
+                                <RotateCcw className="mr-2 size-4" />
+                                Reset Layout
+                            </Button>
                             <Button asChild variant="outline" size="sm">
                                 <Link href={inventory()}>
                                     Open Inventory
@@ -639,161 +1085,116 @@ export default function Dashboard({
                     </CardHeader>
                 </Card>
 
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    {topCards.map((item) => (
-                        <Card
-                            key={item.title}
-                            className="border-border/70 bg-card/90"
+                <div className="flex items-center justify-between px-1">
+                    <h2 className="text-sm font-semibold tracking-wide text-muted-foreground">
+                        Key Metrics
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                        Arrange cards using the top-right handle.
+                    </p>
+                </div>
+
+                <div
+                    ref={metricCardsRef}
+                    className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6"
+                >
+                    {orderedMetricCards.map((item) => (
+                        <div
+                            key={item.id}
+                            data-card-id={item.id}
+                            className={item.cardClassName}
                         >
-                            <CardHeader className="pb-2">
-                                <div className="flex items-center justify-between">
-                                    <CardDescription>
-                                        {item.title}
-                                    </CardDescription>
-                                    <item.icon className="size-4 text-muted-foreground" />
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                <p
-                                    className={`text-2xl font-semibold tracking-tight ${item.tone}`}
+                            <Card
+                                data-dashboard-card
+                                className="relative border-border/70 bg-card/90 shadow-sm transition-shadow hover:shadow-md"
+                            >
+                                <span
+                                    data-drag-handle
+                                    className="absolute top-3 right-3 z-10 cursor-grab rounded-sm p-0.5 text-muted-foreground active:cursor-grabbing"
                                 >
-                                    {formatCount(item.value)}
-                                </p>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                    {item.description}
-                                </p>
-                            </CardContent>
-                        </Card>
+                                    <GripVertical className="size-4" />
+                                </span>
+                                {item.variant === 'stock' ? (
+                                    <>
+                                        <CardHeader className="pb-2">
+                                            <div className="flex items-center gap-2">
+                                                <item.icon className="size-4 text-muted-foreground" />
+                                                <CardDescription>
+                                                    {item.title}
+                                                </CardDescription>
+                                            </div>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <p
+                                                className={`text-2xl font-semibold tracking-tight ${item.tone}`}
+                                            >
+                                                {item.value}
+                                            </p>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                {item.description}
+                                            </p>
+                                        </CardContent>
+                                    </>
+                                ) : (
+                                    <>
+                                        <CardHeader className="pb-2">
+                                            <CardDescription>
+                                                {item.title}
+                                            </CardDescription>
+                                            <CardTitle className="text-lg">
+                                                {item.value}
+                                            </CardTitle>
+                                        </CardHeader>
+                                        <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
+                                            <item.icon className="size-4" />
+                                            {item.description}
+                                        </CardContent>
+                                    </>
+                                )}
+                            </Card>
+                        </div>
                     ))}
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-3">
-                    <Card className="border-border/70 bg-card/90">
-                        <CardHeader className="pb-2">
-                            <CardDescription>Categories</CardDescription>
-                            <CardTitle className="text-lg">
-                                {formatCount(counts.total_categories)}
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Layers className="size-4" />
-                            Configured ingredient groups
-                        </CardContent>
-                    </Card>
-
-                    <Card className="border-border/70 bg-card/90">
-                        <CardHeader className="pb-2">
-                            <CardDescription>Storage Areas</CardDescription>
-                            <CardTitle className="text-lg">
-                                {formatCount(counts.total_storages)}
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Warehouse className="size-4" />
-                            Active inventory locations
-                        </CardContent>
-                    </Card>
-
-                    <Card className="border-border/70 bg-card/90">
-                        <CardHeader className="pb-2">
-                            <CardDescription>Users</CardDescription>
-                            <CardTitle className="text-lg">
-                                {formatCount(counts.total_users)}
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Users className="size-4" />
-                            Accounts with system access
-                        </CardContent>
-                    </Card>
+                <div className="mt-2 flex items-center justify-between px-1">
+                    <h2 className="text-sm font-semibold tracking-wide text-muted-foreground">
+                        Operational Insights
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                        Charts and latest activity at a glance.
+                    </p>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-3">
-                    <Card className="border-border/70 bg-card/90 lg:col-span-2">
-                        <CardHeader>
-                            <CardTitle>New Ingredients (Last 7 Days)</CardTitle>
-                            <CardDescription>
-                                Daily additions trend for recent inventory
-                                intake.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <TrendChart data={dailyAdded} />
-                        </CardContent>
-                    </Card>
-
-                    <Card className="border-border/70 bg-card/90">
-                        <CardHeader>
-                            <CardTitle>Stock Distribution</CardTitle>
-                            <CardDescription>
-                                Share of items by stock status.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <StatusDonutChart
-                                data={statusChart}
-                                total={counts.total_ingredients}
-                            />
-                        </CardContent>
-                    </Card>
-                </div>
-
-                <div className="grid gap-4 lg:grid-cols-3">
-                    <Card className="border-border/70 bg-card/90 lg:col-span-2">
-                        <CardHeader>
-                            <CardTitle>Top Categories by Item Count</CardTitle>
-                            <CardDescription>
-                                Highest-volume categories based on current
-                                inventory.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <CategoryBars data={categoryChart} />
-                        </CardContent>
-                    </Card>
-
-                    <Card className="border-border/70 bg-card/90">
-                        <CardHeader>
-                            <CardTitle>Recent Additions</CardTitle>
-                            <CardDescription>
-                                Latest ingredient records in the system.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-2.5">
-                            {recentIngredients.length === 0 ? (
-                                <p className="rounded-md border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
-                                    No ingredient records yet.
-                                </p>
-                            ) : (
-                                recentIngredients.map((ingredient) => (
-                                    <div
-                                        key={ingredient.id}
-                                        className="rounded-lg border border-border/70 p-3"
-                                    >
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="min-w-0">
-                                                <p className="truncate text-sm font-medium">
-                                                    {ingredient.name}
-                                                </p>
-                                                <p className="truncate text-xs text-muted-foreground">
-                                                    {ingredient.code}
-                                                </p>
-                                            </div>
-                                            {getStatusBadge(ingredient.status)}
-                                        </div>
-                                        <p className="mt-2 text-xs text-muted-foreground">
-                                            {ingredient.category} -{' '}
-                                            {ingredient.storage}
-                                        </p>
-                                        <p className="mt-1 text-xs text-muted-foreground">
-                                            {ingredient.created_at_human ??
-                                                'Just now'}
-                                        </p>
-                                    </div>
-                                ))
-                            )}
-                        </CardContent>
-                    </Card>
+                <div
+                    ref={insightCardsRef}
+                    className="grid gap-4 lg:grid-cols-3 xl:grid-cols-12"
+                >
+                    {orderedInsightCards.map((item) => (
+                        <div
+                            key={item.id}
+                            data-card-id={item.id}
+                            className={item.cardClassName}
+                        >
+                            <Card
+                                data-dashboard-card
+                                className={`relative flex flex-col border-border/70 bg-card/90 shadow-sm transition-shadow hover:shadow-md ${item.panelClassName}`}
+                            >
+                                <span
+                                    data-drag-handle
+                                    className="absolute top-3 right-3 z-10 cursor-grab rounded-sm p-0.5 text-muted-foreground active:cursor-grabbing"
+                                >
+                                    <GripVertical className="size-4" />
+                                </span>
+                                <CardHeader>
+                                    <CardTitle>{item.title}</CardTitle>
+                                    <CardDescription>
+                                        {item.description}
+                                    </CardDescription>
+                                </CardHeader>
+                                {item.content}
+                            </Card>
+                        </div>
+                    ))}
                 </div>
             </div>
         </AppLayout>
