@@ -10,6 +10,8 @@ Route::redirect('/', '/login')->name('home');
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
     Route::get('inventory', [InventoryController::class, 'index'])->name('inventory');
+    Route::get('inventory/changes', [InventoryController::class, 'changes'])
+        ->name('inventory.changes');
     Route::post('inventory/ingredients', [InventoryController::class, 'storeIngredient'])
         ->name('inventory.ingredients.store');
     Route::put('inventory/ingredients/{ingredient}', [InventoryController::class, 'updateIngredient'])

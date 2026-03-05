@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Category;
 use App\Models\Ingredient;
+use App\Models\IngredientChange;
 use App\Models\Storage;
 use App\Models\Unit;
 use Illuminate\Http\RedirectResponse;
@@ -98,28 +99,132 @@ class InventoryController extends Controller
     }
 
     /**
+     * Show inventory change history.
+     */
+    public function changes(Request $request): Response
+    {
+        $validated = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'per_page' => ['nullable', 'integer', Rule::in(['10', '50', '100'])],
+        ]);
+
+        $search = trim((string) ($validated['search'] ?? ''));
+        $dateFrom = $validated['date_from'] ?? null;
+        $dateTo = $validated['date_to'] ?? null;
+        $perPage = (int) ($validated['per_page'] ?? 10);
+
+        $changesQuery = IngredientChange::query()
+            ->with([
+                'ingredient:id,name,code',
+                'editor:id,name',
+            ])
+            ->when($search !== '', fn ($query) => $query->where('ingredient_code', 'like', "%{$search}%"))
+            ->when($dateFrom, fn ($query, $value) => $query->whereDate('created_at', '>=', $value))
+            ->when($dateTo, fn ($query, $value) => $query->whereDate('created_at', '<=', $value))
+            ->latest('created_at');
+
+        $changes = $changesQuery
+            ->paginate($perPage)
+            ->withQueryString()
+            ->through(fn (IngredientChange $change) => [
+                'id' => $change->id,
+                'change_type' => (string) ($change->change_type ?: 'edited'),
+                'ingredient_name' => $change->ingredient_name ?: ($change->ingredient?->name ?? 'Deleted Ingredient'),
+                'ingredient_code' => $change->ingredient_code ?: ($change->ingredient?->code ?? 'N/A'),
+                'edited_by_name' => $change->editor?->name ?? 'System',
+                'changed_fields' => collect($change->changed_fields ?? [])
+                    ->map(fn (array $field) => [
+                        'field' => (string) ($field['field'] ?? ''),
+                        'from' => isset($field['from']) ? (string) $field['from'] : null,
+                        'to' => isset($field['to']) ? (string) $field['to'] : null,
+                    ])
+                    ->filter(fn (array $field) => $field['field'] !== '')
+                    ->values(),
+                'changed_at' => $change->created_at?->format('M d, Y h:i A'),
+            ]);
+
+        return Inertia::render('inventory-changes', [
+            'changes' => $changes,
+            'filters' => [
+                'search' => $search,
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+                'per_page' => $perPage,
+            ],
+        ]);
+    }
+
+    /**
      * Create an ingredient from inventory page.
      */
     public function storeIngredient(Request $request): RedirectResponse
     {
         $validated = $this->validateIngredient($request);
+        $normalizedName = $this->normalizeName($validated['name']);
 
         $category = Category::query()
             ->findOrFail($validated['category_id'], ['id', 'name']);
+        $unit = Unit::query()
+            ->findOrFail($validated['unit_id'], ['id', 'name']);
+        $storage = Storage::query()
+            ->findOrFail($validated['storage_id'], ['id', 'name']);
+        $quantity = (int) $validated['quantity'];
+        $status = (string) $validated['status'];
 
         $ingredient = Ingredient::query()->create([
-            'name' => $this->normalizeName($validated['name']),
+            'name' => $normalizedName,
             'code' => '',
             'category_id' => $category->id,
-            'quantity' => $validated['quantity'],
-            'unit_id' => $validated['unit_id'],
-            'storage_id' => $validated['storage_id'],
-            'status' => $validated['status'],
+            'quantity' => $quantity,
+            'unit_id' => $unit->id,
+            'storage_id' => $storage->id,
+            'status' => $status,
             'created_by' => $request->user()?->id,
         ]);
 
-        $ingredient->update([
-            'code' => $this->buildIngredientCode($category->name, $ingredient->id),
+        $code = $this->buildIngredientCode($category->name, $ingredient->id);
+        $ingredient->update(['code' => $code]);
+
+        IngredientChange::query()->create([
+            'ingredient_id' => $ingredient->id,
+            'edited_by' => $request->user()?->id,
+            'change_type' => 'added',
+            'ingredient_name' => $normalizedName,
+            'ingredient_code' => $code,
+            'changed_fields' => [
+                [
+                    'field' => 'Name',
+                    'from' => null,
+                    'to' => $normalizedName,
+                ],
+                [
+                    'field' => 'Category',
+                    'from' => null,
+                    'to' => $category->name,
+                ],
+                [
+                    'field' => 'Quantity',
+                    'from' => null,
+                    'to' => (string) $quantity,
+                ],
+                [
+                    'field' => 'Unit',
+                    'from' => null,
+                    'to' => $unit->name,
+                ],
+                [
+                    'field' => 'Storage',
+                    'from' => null,
+                    'to' => $storage->name,
+                ],
+                [
+                    'field' => 'Status',
+                    'from' => null,
+                    'to' => $status,
+                ],
+            ],
         ]);
 
         return to_route('inventory');
@@ -131,19 +236,93 @@ class InventoryController extends Controller
     public function updateIngredient(Request $request, Ingredient $ingredient): RedirectResponse
     {
         $validated = $this->validateIngredient($request);
+        $ingredient->loadMissing([
+            'category:id,name',
+            'unit:id,name',
+            'storage:id,name',
+        ]);
 
-        $category = Category::query()
+        $normalizedName = $this->normalizeName($validated['name']);
+        $newCategory = Category::query()
             ->findOrFail($validated['category_id'], ['id', 'name']);
+        $newUnit = Unit::query()
+            ->findOrFail($validated['unit_id'], ['id', 'name']);
+        $newStorage = Storage::query()
+            ->findOrFail($validated['storage_id'], ['id', 'name']);
+        $newQuantity = (int) $validated['quantity'];
+        $newStatus = (string) $validated['status'];
+        $newCode = $this->buildIngredientCode($newCategory->name, $ingredient->id);
+
+        $changedFields = [];
+
+        if ($ingredient->name !== $normalizedName) {
+            $changedFields[] = [
+                'field' => 'Name',
+                'from' => $ingredient->name,
+                'to' => $normalizedName,
+            ];
+        }
+
+        if ((int) $ingredient->category_id !== (int) $newCategory->id) {
+            $changedFields[] = [
+                'field' => 'Category',
+                'from' => $ingredient->category?->name ?? '',
+                'to' => $newCategory->name,
+            ];
+        }
+
+        if ((int) $ingredient->quantity !== $newQuantity) {
+            $changedFields[] = [
+                'field' => 'Quantity',
+                'from' => (string) $ingredient->quantity,
+                'to' => (string) $newQuantity,
+            ];
+        }
+
+        if ((int) $ingredient->unit_id !== (int) $newUnit->id) {
+            $changedFields[] = [
+                'field' => 'Unit',
+                'from' => $ingredient->unit?->name ?? '',
+                'to' => $newUnit->name,
+            ];
+        }
+
+        if ((int) $ingredient->storage_id !== (int) $newStorage->id) {
+            $changedFields[] = [
+                'field' => 'Storage',
+                'from' => $ingredient->storage?->name ?? '',
+                'to' => $newStorage->name,
+            ];
+        }
+
+        if ((string) $ingredient->status !== $newStatus) {
+            $changedFields[] = [
+                'field' => 'Status',
+                'from' => $ingredient->status,
+                'to' => $newStatus,
+            ];
+        }
 
         $ingredient->update([
-            'name' => $this->normalizeName($validated['name']),
-            'code' => $this->buildIngredientCode($category->name, $ingredient->id),
-            'category_id' => $category->id,
-            'quantity' => $validated['quantity'],
-            'unit_id' => $validated['unit_id'],
-            'storage_id' => $validated['storage_id'],
-            'status' => $validated['status'],
+            'name' => $normalizedName,
+            'code' => $newCode,
+            'category_id' => $newCategory->id,
+            'quantity' => $newQuantity,
+            'unit_id' => $newUnit->id,
+            'storage_id' => $newStorage->id,
+            'status' => $newStatus,
         ]);
+
+        if ($changedFields !== []) {
+            IngredientChange::query()->create([
+                'ingredient_id' => $ingredient->id,
+                'edited_by' => $request->user()?->id,
+                'change_type' => 'edited',
+                'ingredient_name' => $normalizedName,
+                'ingredient_code' => $newCode,
+                'changed_fields' => $changedFields,
+            ]);
+        }
 
         return to_route('inventory');
     }
@@ -151,8 +330,54 @@ class InventoryController extends Controller
     /**
      * Delete an ingredient from inventory page.
      */
-    public function destroyIngredient(Ingredient $ingredient): RedirectResponse
+    public function destroyIngredient(Request $request, Ingredient $ingredient): RedirectResponse
     {
+        $ingredient->loadMissing([
+            'category:id,name',
+            'unit:id,name',
+            'storage:id,name',
+        ]);
+
+        IngredientChange::query()->create([
+            'ingredient_id' => $ingredient->id,
+            'edited_by' => $request->user()?->id,
+            'change_type' => 'deleted',
+            'ingredient_name' => $ingredient->name,
+            'ingredient_code' => $ingredient->code,
+            'changed_fields' => [
+                [
+                    'field' => 'Name',
+                    'from' => $ingredient->name,
+                    'to' => null,
+                ],
+                [
+                    'field' => 'Category',
+                    'from' => $ingredient->category?->name ?? null,
+                    'to' => null,
+                ],
+                [
+                    'field' => 'Quantity',
+                    'from' => (string) $ingredient->quantity,
+                    'to' => null,
+                ],
+                [
+                    'field' => 'Unit',
+                    'from' => $ingredient->unit?->name ?? null,
+                    'to' => null,
+                ],
+                [
+                    'field' => 'Storage',
+                    'from' => $ingredient->storage?->name ?? null,
+                    'to' => null,
+                ],
+                [
+                    'field' => 'Status',
+                    'from' => $ingredient->status,
+                    'to' => null,
+                ],
+            ],
+        ]);
+
         $ingredient->delete();
 
         return to_route('inventory');

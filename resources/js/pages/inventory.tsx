@@ -1,4 +1,4 @@
-import { Head, router } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import {
     Check,
     ChevronLeft,
@@ -10,6 +10,7 @@ import {
     Package,
     Pencil,
     Plus,
+    History,
     Search,
     Trash2,
 } from 'lucide-react';
@@ -674,12 +675,24 @@ export default function Inventory({
                         open={isAddDialogOpen}
                         onOpenChange={handleAddDialogOpenChange}
                     >
-                        <DialogTrigger asChild>
-                            <Button className="w-full gap-2 sm:w-auto">
-                                <Plus className="size-4" />
-                                Add Ingredient
+                        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                            <Button
+                                asChild
+                                variant="outline"
+                                className="w-full gap-2 sm:w-auto"
+                            >
+                                <Link href="/inventory/changes">
+                                    <History className="size-4" />
+                                    View Changes
+                                </Link>
                             </Button>
-                        </DialogTrigger>
+                            <DialogTrigger asChild>
+                                <Button className="w-full gap-2 sm:w-auto">
+                                    <Plus className="size-4" />
+                                    Add Ingredient
+                                </Button>
+                            </DialogTrigger>
+                        </div>
                         <DialogContent
                             className="sm:max-w-2xl"
                             onInteractOutside={(event) =>
