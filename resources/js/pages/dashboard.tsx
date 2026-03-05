@@ -1,4 +1,4 @@
-import { Head, Link } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import {
     ArrowRight,
     Boxes,
@@ -9,7 +9,7 @@ import {
     Users,
     Warehouse,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { MouseEventHandler } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -78,6 +78,15 @@ const breadcrumbs: BreadcrumbItem[] = [
         href: dashboard(),
     },
 ];
+
+const dashboardRealtimeKeys = [
+    'counts',
+    'statusChart',
+    'dailyAdded',
+    'categoryChart',
+    'recentIngredients',
+] as const;
+const dashboardRefreshIntervalMs = 5000;
 
 const formatCount = (value: number) => new Intl.NumberFormat().format(value);
 
@@ -522,6 +531,44 @@ export default function Dashboard({
     categoryChart,
     recentIngredients,
 }: DashboardPageProps) {
+    useEffect(() => {
+        let isReloading = false;
+
+        const reloadDashboardData = () => {
+            if (document.visibilityState === 'hidden' || isReloading) {
+                return;
+            }
+
+            isReloading = true;
+            router.reload({
+                only: [...dashboardRealtimeKeys],
+                onFinish: () => {
+                    isReloading = false;
+                },
+            });
+        };
+
+        const intervalId = window.setInterval(
+            reloadDashboardData,
+            dashboardRefreshIntervalMs,
+        );
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                reloadDashboardData();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            window.clearInterval(intervalId);
+            document.removeEventListener(
+                'visibilitychange',
+                handleVisibilityChange,
+            );
+        };
+    }, []);
+
     const totalTrackedStatuses =
         counts.in_stock + counts.low_stock + counts.out_of_stock;
     const topCards = [
@@ -575,12 +622,7 @@ export default function Dashboard({
                             </CardDescription>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                            <Badge
-                                variant="secondary"
-                                className="rounded-full px-3 py-1 text-xs"
-                            >
-                                Live Snapshot
-                            </Badge>
+                          
                             <Button asChild variant="outline" size="sm">
                                 <Link href={inventory()}>
                                     Open Inventory
