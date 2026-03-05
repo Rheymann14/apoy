@@ -67,6 +67,14 @@ const breadcrumbs: BreadcrumbItem[] = [
 ];
 
 const entriesPerPageOptions = [10, 50, 100] as const;
+const deletedValueFields = [
+    'Name',
+    'Category',
+    'Quantity',
+    'Unit',
+    'Storage',
+    'Status',
+] as const;
 
 const toDisplayValue = (value: string | null) => {
     if (value === null || value.trim() === '') {
@@ -74,6 +82,15 @@ const toDisplayValue = (value: string | null) => {
     }
 
     return value;
+};
+
+const getPreviousFieldValue = (
+    changedFields: ChangedField[],
+    fieldName: (typeof deletedValueFields)[number],
+) => {
+    return (
+        changedFields.find((field) => field.field === fieldName)?.from ?? null
+    );
 };
 
 const getCardTone = (changeType: ChangeType) => {
@@ -368,29 +385,62 @@ export default function InventoryChanges({
                                             </p>
                                         </div>
 
-                                        <div className="mt-3 space-y-1.5">
-                                            {change.changed_fields.map(
-                                                (field) => (
-                                                    <p
-                                                        key={`${change.id}-${field.field}`}
-                                                        className="rounded-md bg-background/65 px-2.5 py-1.5 text-xs"
-                                                    >
-                                                        <span className="font-medium">
-                                                            {field.field}:
-                                                        </span>{' '}
-                                                        {toDisplayValue(
-                                                            field.from,
-                                                        )}{' '}
-                                                        <span className="text-muted-foreground">
-                                                            -&gt;
-                                                        </span>{' '}
-                                                        {toDisplayValue(
-                                                            field.to,
-                                                        )}
-                                                    </p>
-                                                ),
-                                            )}
-                                        </div>
+                                        {change.change_type === 'deleted' ? (
+                                            <div className="mt-3 rounded-md bg-background/65 p-3">
+                                                <p className="mb-2 text-xs font-medium text-muted-foreground">
+                                                    Last Values
+                                                </p>
+                                                <div className="grid gap-1.5 sm:grid-cols-2">
+                                                    {deletedValueFields.map(
+                                                        (fieldName) => (
+                                                            <p
+                                                                key={`${change.id}-${fieldName}`}
+                                                                className="text-xs"
+                                                            >
+                                                                <span className="font-medium">
+                                                                    {fieldName}:
+                                                                </span>{' '}
+                                                                {fieldName ===
+                                                                'Name'
+                                                                    ? toDisplayValue(
+                                                                          change.ingredient_name,
+                                                                      )
+                                                                    : toDisplayValue(
+                                                                          getPreviousFieldValue(
+                                                                              change.changed_fields,
+                                                                              fieldName,
+                                                                          ),
+                                                                      )}
+                                                            </p>
+                                                        ),
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="mt-3 space-y-1.5">
+                                                {change.changed_fields.map(
+                                                    (field) => (
+                                                        <p
+                                                            key={`${change.id}-${field.field}`}
+                                                            className="rounded-md bg-background/65 px-2.5 py-1.5 text-xs"
+                                                        >
+                                                            <span className="font-medium">
+                                                                {field.field}:
+                                                            </span>{' '}
+                                                            {toDisplayValue(
+                                                                field.from,
+                                                            )}{' '}
+                                                            <span className="text-muted-foreground">
+                                                                -&gt;
+                                                            </span>{' '}
+                                                            {toDisplayValue(
+                                                                field.to,
+                                                            )}
+                                                        </p>
+                                                    ),
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 ))}
                             </div>
