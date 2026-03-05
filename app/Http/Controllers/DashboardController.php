@@ -75,12 +75,40 @@ class DashboardController extends Controller
             ])
             ->values();
 
+        $inventoryItems = Ingredient::query()
+            ->with(['category:id,name', 'unit:id,name', 'storage:id,name'])
+            ->select([
+                'id',
+                'name',
+                'code',
+                'quantity',
+                'status',
+                'category_id',
+                'unit_id',
+                'storage_id',
+            ])
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (Ingredient $ingredient) => [
+                'id' => $ingredient->id,
+                'name' => $ingredient->name,
+                'code' => $ingredient->code,
+                'category' => $ingredient->category?->name ?? 'Uncategorized',
+                'quantity' => (int) $ingredient->quantity,
+                'unit' => $ingredient->unit?->name ?? 'N/A',
+                'storage' => $ingredient->storage?->name ?? 'Unassigned',
+                'status' => $ingredient->status,
+            ])
+            ->values();
+
         return Inertia::render('dashboard', [
             'counts' => $counts,
             'statusChart' => $statusChart,
             'dailyAdded' => $dailyAdded,
             'categoryChart' => $categoryChart,
             'recentIngredients' => $recentIngredients,
+            'inventoryItems' => $inventoryItems,
         ]);
     }
 
