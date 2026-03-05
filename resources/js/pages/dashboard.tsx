@@ -317,7 +317,7 @@ type TrendChartProps = {
 function TrendChart({ data }: TrendChartProps) {
     const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
     const chartData = data.length > 0 ? data : [{ label: 'N/A', value: 0 }];
-    const width = Math.max(620, chartData.length * 72);
+    const width = Math.max(300, chartData.length * 56);
     const height = 210;
     const xStart = 26;
     const xEnd = width - 26;
@@ -342,12 +342,76 @@ function TrendChart({ data }: TrendChartProps) {
     const isTooltipBelowPoint =
         hoveredPoint !== null && hoveredPoint.y < yTop + 26;
 
-    const linePath = points
-        .map(
-            (point, index) =>
-                `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`,
-        )
-        .join(' ');
+    const toSmoothPath = (
+        chartPoints: Array<{ x: number; y: number }>,
+        smoothing = 0.18,
+    ) => {
+        if (chartPoints.length === 0) {
+            return '';
+        }
+
+        if (chartPoints.length === 1) {
+            const point = chartPoints[0];
+            return `M ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+        }
+
+        if (chartPoints.length === 2) {
+            const [start, end] = chartPoints;
+            return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
+        }
+
+        const getControlPoint = (
+            current: { x: number; y: number },
+            previous: { x: number; y: number } | undefined,
+            next: { x: number; y: number } | undefined,
+            reverse = false,
+        ) => {
+            const previousPoint = previous ?? current;
+            const nextPoint = next ?? current;
+            const angle =
+                Math.atan2(
+                    nextPoint.y - previousPoint.y,
+                    nextPoint.x - previousPoint.x,
+                ) + (reverse ? Math.PI : 0);
+            const length =
+                Math.hypot(
+                    nextPoint.x - previousPoint.x,
+                    nextPoint.y - previousPoint.y,
+                ) * smoothing;
+
+            return {
+                x: current.x + Math.cos(angle) * length,
+                y: current.y + Math.sin(angle) * length,
+            };
+        };
+
+        let path = `M ${chartPoints[0].x.toFixed(2)} ${chartPoints[0].y.toFixed(2)}`;
+
+        for (let index = 1; index < chartPoints.length; index += 1) {
+            const currentPoint = chartPoints[index];
+            const previousPoint = chartPoints[index - 1];
+            const previousPreviousPoint = chartPoints[index - 2];
+            const nextPoint = chartPoints[index + 1];
+
+            const controlPointStart = getControlPoint(
+                previousPoint,
+                previousPreviousPoint,
+                currentPoint,
+            );
+            const controlPointEnd = getControlPoint(
+                currentPoint,
+                previousPoint,
+                nextPoint,
+                true,
+            );
+
+            path += ` C ${controlPointStart.x.toFixed(2)} ${controlPointStart.y.toFixed(2)} ${controlPointEnd.x.toFixed(2)} ${controlPointEnd.y.toFixed(2)} ${currentPoint.x.toFixed(2)} ${currentPoint.y.toFixed(2)}`;
+        }
+
+        return path;
+    };
+
+    const linePath = toSmoothPath(points);
 
     const firstPoint = points[0];
     const lastPoint = points[points.length - 1];
@@ -357,145 +421,150 @@ function TrendChart({ data }: TrendChartProps) {
         <div className="space-y-2">
             <div className="overflow-x-auto pb-1">
                 <div
-                    className="relative min-w-full"
-                    style={{ width: `${width}px` }}
+                    className="min-w-full space-y-2"
+                    style={{ width: `max(100%, ${width}px)` }}
                 >
-                    <svg
-                        viewBox={`0 0 ${width} ${height}`}
-                        className="h-52 w-full"
-                    >
-                        <defs>
-                            <linearGradient
-                                id="dailyTrendFill"
-                                x1="0"
-                                y1="0"
-                                x2="0"
-                                y2="1"
-                            >
-                                <stop
-                                    offset="0%"
-                                    stopColor="#7aa99a"
-                                    stopOpacity="0.35"
-                                />
-                                <stop
-                                    offset="100%"
-                                    stopColor="#7aa99a"
-                                    stopOpacity="0.02"
-                                />
-                            </linearGradient>
-                        </defs>
+                    <div className="relative">
+                        <svg
+                            viewBox={`0 0 ${width} ${height}`}
+                            preserveAspectRatio="none"
+                            className="h-52 w-full"
+                        >
+                            <defs>
+                                <linearGradient
+                                    id="dailyTrendFill"
+                                    x1="0"
+                                    y1="0"
+                                    x2="0"
+                                    y2="1"
+                                >
+                                    <stop
+                                        offset="0%"
+                                        stopColor="#7aa99a"
+                                        stopOpacity="0.35"
+                                    />
+                                    <stop
+                                        offset="100%"
+                                        stopColor="#7aa99a"
+                                        stopOpacity="0.02"
+                                    />
+                                </linearGradient>
+                            </defs>
 
-                        {Array.from({ length: 4 }).map((_, index) => {
-                            const y = yTop + ((yBottom - yTop) * index) / 3;
-                            return (
+                            {Array.from({ length: 4 }).map((_, index) => {
+                                const y = yTop + ((yBottom - yTop) * index) / 3;
+                                return (
+                                    <line
+                                        key={index}
+                                        x1={xStart}
+                                        y1={y}
+                                        x2={xEnd}
+                                        y2={y}
+                                        stroke="currentColor"
+                                        strokeOpacity={0.12}
+                                        strokeWidth={1}
+                                    />
+                                );
+                            })}
+
+                            {hoveredPoint && (
                                 <line
-                                    key={index}
-                                    x1={xStart}
-                                    y1={y}
-                                    x2={xEnd}
-                                    y2={y}
-                                    stroke="currentColor"
-                                    strokeOpacity={0.12}
-                                    strokeWidth={1}
+                                    x1={hoveredPoint.x}
+                                    y1={yTop}
+                                    x2={hoveredPoint.x}
+                                    y2={yBottom}
+                                    stroke="#5d8f80"
+                                    strokeOpacity={0.3}
+                                    strokeDasharray="4 4"
                                 />
-                            );
-                        })}
+                            )}
+
+                            <path d={areaPath} fill="url(#dailyTrendFill)" />
+                            <path
+                                d={linePath}
+                                fill="none"
+                                stroke="#5d8f80"
+                                strokeWidth={2.4}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            />
+                            {points.map((point) => {
+                                const isHovered = hoveredLabel === point.label;
+                                return (
+                                    <g key={point.label}>
+                                        <circle
+                                            cx={point.x}
+                                            cy={point.y}
+                                            r={isHovered ? 4.5 : 3}
+                                            fill={
+                                                isHovered
+                                                    ? '#5d8f80'
+                                                    : '#ffffff'
+                                            }
+                                            stroke="#5d8f80"
+                                            strokeWidth={2}
+                                        />
+                                        <circle
+                                            cx={point.x}
+                                            cy={point.y}
+                                            r={12}
+                                            fill="transparent"
+                                            onMouseEnter={() =>
+                                                setHoveredLabel(point.label)
+                                            }
+                                            onMouseLeave={() =>
+                                                setHoveredLabel(null)
+                                            }
+                                        />
+                                    </g>
+                                );
+                            })}
+                        </svg>
 
                         {hoveredPoint && (
-                            <line
-                                x1={hoveredPoint.x}
-                                y1={yTop}
-                                x2={hoveredPoint.x}
-                                y2={yBottom}
-                                stroke="#5d8f80"
-                                strokeOpacity={0.3}
-                                strokeDasharray="4 4"
-                            />
+                            <div
+                                className="pointer-events-none absolute z-10 rounded-md border border-border/70 bg-card/95 px-2 py-1 text-xs shadow-sm"
+                                style={{
+                                    left: `${(hoveredPoint.x / width) * 100}%`,
+                                    top: `${Math.max(
+                                        8,
+                                        ((hoveredPoint.y +
+                                            (isTooltipBelowPoint ? 14 : -12)) /
+                                            height) *
+                                            100,
+                                    )}%`,
+                                    transform: isTooltipBelowPoint
+                                        ? 'translate(-50%, 0)'
+                                        : 'translate(-50%, -100%)',
+                                }}
+                            >
+                                <p className="font-medium">
+                                    {hoveredPoint.label}
+                                </p>
+                                <p className="text-muted-foreground">
+                                    {formatCount(hoveredPoint.value)} added
+                                </p>
+                            </div>
                         )}
-
-                        <path d={areaPath} fill="url(#dailyTrendFill)" />
-                        <path
-                            d={linePath}
-                            fill="none"
-                            stroke="#5d8f80"
-                            strokeWidth={2.4}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        />
-                        {points.map((point) => {
-                            const isHovered = hoveredLabel === point.label;
-                            return (
-                                <g key={point.label}>
-                                    <circle
-                                        cx={point.x}
-                                        cy={point.y}
-                                        r={isHovered ? 4.5 : 3}
-                                        fill={isHovered ? '#5d8f80' : '#ffffff'}
-                                        stroke="#5d8f80"
-                                        strokeWidth={2}
-                                    />
-                                    <circle
-                                        cx={point.x}
-                                        cy={point.y}
-                                        r={12}
-                                        fill="transparent"
-                                        onMouseEnter={() =>
-                                            setHoveredLabel(point.label)
-                                        }
-                                        onMouseLeave={() =>
-                                            setHoveredLabel(null)
-                                        }
-                                    />
-                                </g>
-                            );
-                        })}
-                    </svg>
-
-                    {hoveredPoint && (
-                        <div
-                            className="pointer-events-none absolute z-10 rounded-md border border-border/70 bg-card/95 px-2 py-1 text-xs shadow-sm"
-                            style={{
-                                left: `${(hoveredPoint.x / width) * 100}%`,
-                                top: `${Math.max(
-                                    8,
-                                    ((hoveredPoint.y +
-                                        (isTooltipBelowPoint ? 14 : -12)) /
-                                        height) *
-                                        100,
-                                )}%`,
-                                transform: isTooltipBelowPoint
-                                    ? 'translate(-50%, 0)'
-                                    : 'translate(-50%, -100%)',
-                            }}
-                        >
-                            <p className="font-medium">{hoveredPoint.label}</p>
-                            <p className="text-muted-foreground">
-                                {formatCount(hoveredPoint.value)} added
-                            </p>
-                        </div>
-                    )}
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        {chartData.map((point, index) => (
+                            <span
+                                key={point.label}
+                                className={
+                                    hoveredLabel === point.label
+                                        ? 'text-foreground'
+                                        : 'text-muted-foreground'
+                                }
+                            >
+                                {index % labelStep === 0 ||
+                                index === chartData.length - 1
+                                    ? point.label
+                                    : '\u00A0'}
+                            </span>
+                        ))}
+                    </div>
                 </div>
-            </div>
-
-            <div
-                className="flex items-center justify-between text-xs text-muted-foreground"
-                style={{ width: `${width}px`, minWidth: '100%' }}
-            >
-                {chartData.map((point, index) => (
-                    <span
-                        key={point.label}
-                        className={
-                            hoveredLabel === point.label
-                                ? 'text-foreground'
-                                : 'text-muted-foreground'
-                        }
-                    >
-                        {index % labelStep === 0 ||
-                        index === chartData.length - 1
-                            ? point.label
-                            : '\u00A0'}
-                    </span>
-                ))}
             </div>
         </div>
     );
@@ -587,10 +656,11 @@ function StatusDonutChart({ data, total }: StatusDonutChartProps) {
             null;
         setHoveredSegment(match);
     };
+    const shouldScrollLegend = data.length > 4;
 
     return (
-        <div className="flex h-full min-h-0 flex-col gap-4">
-            <div className="relative mx-auto size-40 shrink-0 sm:size-44">
+        <div className="flex h-full flex-col gap-4">
+            <div className="relative mx-auto aspect-square w-32 shrink-0 sm:w-40 lg:w-44">
                 <div
                     className="relative size-full rounded-full transition-shadow duration-200"
                     style={{
@@ -635,7 +705,11 @@ function StatusDonutChart({ data, total }: StatusDonutChartProps) {
                 )}
             </div>
 
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+            <div
+                className={`space-y-2 ${
+                    shouldScrollLegend ? 'max-h-48 overflow-y-auto pr-1' : ''
+                }`}
+            >
                 {data.map((item) => {
                     const segment = segmentByLabel.get(item.label) ?? null;
                     const isHovered = hoveredSegment?.label === item.label;
@@ -651,7 +725,7 @@ function StatusDonutChart({ data, total }: StatusDonutChartProps) {
                             onMouseEnter={() => setHoveredSegment(segment)}
                             onMouseLeave={() => setHoveredSegment(null)}
                         >
-                            <div className="flex items-center gap-2 text-sm">
+                            <div className="flex min-w-0 items-center gap-2 text-sm">
                                 <span
                                     className="size-2.5 rounded-full"
                                     style={{
@@ -659,7 +733,7 @@ function StatusDonutChart({ data, total }: StatusDonutChartProps) {
                                             statusColorMap[item.label],
                                     }}
                                 />
-                                {item.label}
+                                <span className="truncate">{item.label}</span>
                             </div>
                             <span className="text-sm text-muted-foreground">
                                 {formatCount(item.value)}
@@ -949,9 +1023,10 @@ export default function Dashboard({
             title: 'New Ingredients (Last 7 Days)',
             description: 'Daily additions trend for recent inventory intake.',
             cardClassName: 'lg:col-span-2 xl:col-span-8',
-            panelClassName: 'min-h-[22rem] lg:h-[24rem]',
+            panelClassName:
+                'min-h-[18rem] min-w-0 sm:min-h-[20rem] lg:min-h-[24rem]',
             content: (
-                <CardContent className="flex-1 pb-3">
+                <CardContent className="min-w-0 flex-1 pb-3">
                     <TrendChart data={dailyAdded} />
                 </CardContent>
             ),
@@ -961,9 +1036,10 @@ export default function Dashboard({
             title: 'Stock Distribution',
             description: 'Share of items by stock status.',
             cardClassName: 'xl:col-span-4',
-            panelClassName: 'min-h-[22rem] lg:h-[24rem]',
+            panelClassName:
+                'min-h-[18rem] min-w-0 sm:min-h-[20rem] lg:min-h-[24rem]',
             content: (
-                <CardContent className="flex h-full min-h-0 flex-1">
+                <CardContent className="min-w-0 flex-1">
                     <StatusDonutChart
                         data={statusChart}
                         total={counts.total_ingredients}
@@ -977,9 +1053,10 @@ export default function Dashboard({
             description:
                 'Highest-volume categories based on current inventory.',
             cardClassName: 'lg:col-span-2 xl:col-span-8',
-            panelClassName: 'min-h-[22rem] lg:h-[24rem]',
+            panelClassName:
+                'min-h-[18rem] min-w-0 sm:min-h-[20rem] lg:min-h-[24rem]',
             content: (
-                <CardContent className="flex-1 overflow-hidden">
+                <CardContent className="min-w-0 flex-1 overflow-hidden">
                     <CategoryBars data={categoryChart} />
                 </CardContent>
             ),
@@ -989,9 +1066,10 @@ export default function Dashboard({
             title: 'Recent Additions',
             description: 'Latest ingredient records in the system.',
             cardClassName: 'xl:col-span-4',
-            panelClassName: 'min-h-[22rem] lg:h-[24rem]',
+            panelClassName:
+                'min-h-[18rem] min-w-0 sm:min-h-[20rem] lg:min-h-[24rem]',
             content: (
-                <CardContent className="flex-1 space-y-2.5 overflow-y-auto pr-1">
+                <CardContent className="flex-1 space-y-2.5 lg:overflow-y-auto lg:pr-1">
                     {recentIngredients.length === 0 ? (
                         <p className="rounded-md border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
                             No ingredient records yet.
@@ -1013,7 +1091,7 @@ export default function Dashboard({
                                     </div>
                                     {getStatusBadge(ingredient.status)}
                                 </div>
-                                <p className="mt-2 text-xs text-muted-foreground">
+                                <p className="mt-2 text-xs break-words text-muted-foreground">
                                     {ingredient.category} - {ingredient.storage}
                                 </p>
                                 <p className="mt-1 text-xs text-muted-foreground">
@@ -1040,11 +1118,11 @@ export default function Dashboard({
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Dashboard" />
 
-            <div className="animate-in space-y-4 duration-500 fade-in-0 slide-in-from-bottom-2">
+            <div className="animate-in space-y-4 overflow-x-hidden duration-500 fade-in-0 slide-in-from-bottom-2">
                 <Card className="border-border/70 bg-card/90">
                     <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div>
-                            <CardTitle className="text-2xl tracking-tight">
+                            <CardTitle className="text-xl tracking-tight sm:text-2xl">
                                 Inventory Overview
                             </CardTitle>
                             <CardDescription className="mt-1">
@@ -1052,30 +1130,26 @@ export default function Dashboard({
                                 from your inventory records.
                             </CardDescription>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                            <Badge
-                                variant="secondary"
-                                className="rounded-full px-3 py-1 text-xs"
-                            >
-                                Drag to Arrange
-                            </Badge>
+                        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+                        
+                
                             <Button
-                                type="button"
+                                asChild
                                 variant="outline"
                                 size="sm"
-                                onClick={handleResetCardLayout}
-                                disabled={isDefaultCardLayout}
+                                className="w-full sm:w-auto"
                             >
-                                <RotateCcw className="mr-2 size-4" />
-                                Reset Layout
-                            </Button>
-                            <Button asChild variant="outline" size="sm">
                                 <Link href={inventory()}>
                                     Open Inventory
                                     <ArrowRight className="ml-2 size-4" />
                                 </Link>
                             </Button>
-                            <Button asChild variant="outline" size="sm">
+                            <Button
+                                asChild
+                                variant="outline"
+                                size="sm"
+                                className="w-full sm:w-auto"
+                            >
                                 <Link href={management()}>
                                     Open Management
                                     <ArrowRight className="ml-2 size-4" />
@@ -1085,7 +1159,7 @@ export default function Dashboard({
                     </CardHeader>
                 </Card>
 
-                <div className="flex items-center justify-between px-1">
+                <div className="flex flex-col gap-1 px-1 sm:flex-row sm:items-center sm:justify-between">
                     <h2 className="text-sm font-semibold tracking-wide text-muted-foreground">
                         Key Metrics
                     </h2>
@@ -1093,6 +1167,18 @@ export default function Dashboard({
                         Arrange cards using the top-right handle.
                     </p>
                 </div>
+
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="w-full sm:w-auto"
+                                onClick={handleResetCardLayout}
+                                disabled={isDefaultCardLayout}
+                            >
+                                <RotateCcw className="mr-2 size-4" />
+                                Reset Layout
+                            </Button>
 
                 <div
                     ref={metricCardsRef}
@@ -1102,11 +1188,11 @@ export default function Dashboard({
                         <div
                             key={item.id}
                             data-card-id={item.id}
-                            className={item.cardClassName}
+                            className={`min-w-0 ${item.cardClassName}`}
                         >
                             <Card
                                 data-dashboard-card
-                                className="relative border-border/70 bg-card/90 shadow-sm transition-shadow hover:shadow-md"
+                                className="relative min-w-0 border-border/70 bg-card/90 shadow-sm transition-shadow hover:shadow-md"
                             >
                                 <span
                                     data-drag-handle
@@ -1156,7 +1242,7 @@ export default function Dashboard({
                     ))}
                 </div>
 
-                <div className="mt-2 flex items-center justify-between px-1">
+                <div className="mt-2 flex flex-col gap-1 px-1 sm:flex-row sm:items-center sm:justify-between">
                     <h2 className="text-sm font-semibold tracking-wide text-muted-foreground">
                         Operational Insights
                     </h2>
@@ -1173,11 +1259,11 @@ export default function Dashboard({
                         <div
                             key={item.id}
                             data-card-id={item.id}
-                            className={item.cardClassName}
+                            className={`min-w-0 ${item.cardClassName}`}
                         >
                             <Card
                                 data-dashboard-card
-                                className={`relative flex flex-col border-border/70 bg-card/90 shadow-sm transition-shadow hover:shadow-md ${item.panelClassName}`}
+                                className={`relative flex min-w-0 flex-col border-border/70 bg-card/90 shadow-sm transition-shadow hover:shadow-md ${item.panelClassName}`}
                             >
                                 <span
                                     data-drag-handle
