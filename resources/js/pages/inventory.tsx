@@ -2,7 +2,9 @@ import { Head, router } from '@inertiajs/react';
 import {
     Check,
     ChevronLeft,
+    ChevronDown,
     ChevronRight,
+    ChevronUp,
     ChevronsUpDown,
     Loader2,
     Package,
@@ -28,7 +30,11 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from '@/components/ui/tooltip';
 import AppLayout from '@/layouts/app-layout';
 import { cn } from '@/lib/utils';
 import { dashboard, inventory } from '@/routes';
@@ -77,6 +83,16 @@ type DeleteDialogTarget = {
     name: string;
 };
 
+type SortField =
+    | 'name'
+    | 'code'
+    | 'category'
+    | 'quantity'
+    | 'unit'
+    | 'storage'
+    | 'status';
+type SortDirection = 'asc' | 'desc';
+
 const breadcrumbs: BreadcrumbItem[] = [
     {
         title: 'Dashboard',
@@ -89,14 +105,30 @@ const breadcrumbs: BreadcrumbItem[] = [
 ];
 
 const entriesPerPageOptions = [10, 50, 100] as const;
-const statusOptions: InventoryStatus[] = ['In Stock', 'Low Stock', 'Out of Stock'];
+const deriveStatusFromQuantity = (quantity: number): InventoryStatus => {
+    if (quantity === 0) {
+        return 'Out of Stock';
+    }
+
+    if (quantity <= 5) {
+        return 'Low Stock';
+    }
+
+    return 'In Stock';
+};
+
+const toNormalizedQuantity = (value: string): number => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+};
+
 const defaultForm: IngredientForm = {
     name: '',
     categoryId: '',
     quantity: '0',
     unitId: '',
     storageId: '',
-    status: 'In Stock',
+    status: deriveStatusFromQuantity(0),
 };
 
 const toIngredientForm = (item: InventoryItem): IngredientForm => ({
@@ -105,11 +137,10 @@ const toIngredientForm = (item: InventoryItem): IngredientForm => ({
     quantity: String(item.quantity),
     unitId: String(item.unit_id),
     storageId: String(item.storage_id),
-    status: item.status,
+    status: deriveStatusFromQuantity(item.quantity),
 });
 
-const normalizeName = (value: string) =>
-    value.trim().replace(/\s+/g, ' ');
+const normalizeName = (value: string) => value.trim().replace(/\s+/g, ' ');
 
 const getFirstErrorMessage = (errors: unknown) => {
     if (!errors || typeof errors !== 'object') {
@@ -237,18 +268,24 @@ function SearchableOptionField({
                     className="w-full justify-between font-normal"
                     onClick={() => setIsOpen((open) => !open)}
                 >
-                    <span className={cn(!selectedOption && 'text-muted-foreground')}>
+                    <span
+                        className={cn(
+                            !selectedOption && 'text-muted-foreground',
+                        )}
+                    >
                         {selectedOption?.name || placeholder}
                     </span>
                     <ChevronsUpDown className="size-4 opacity-50" />
                 </Button>
 
                 {isOpen ? (
-                    <div className="bg-popover text-popover-foreground absolute z-20 mt-1 w-full rounded-md border shadow-md">
+                    <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover text-popover-foreground shadow-md">
                         <div className="border-b p-2">
                             <Input
                                 value={search}
-                                onChange={(event) => setSearch(event.target.value)}
+                                onChange={(event) =>
+                                    setSearch(event.target.value)
+                                }
                                 placeholder={searchPlaceholder}
                                 className="h-8"
                             />
@@ -263,7 +300,7 @@ function SearchableOptionField({
                                     <button
                                         key={option.id}
                                         type="button"
-                                        className="hover:bg-accent hover:text-accent-foreground flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-sm"
+                                        className="flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
                                         onClick={() => {
                                             onValueChange(String(option.id));
                                             setSearch('');
@@ -298,56 +335,26 @@ export default function Inventory({
 }: InventoryPageProps) {
     const [items, setItems] = useState<InventoryItem[]>(ingredients);
     const [search, setSearch] = useState('');
+    const [sortField, setSortField] = useState<SortField | null>(null);
+    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const [currentPage, setCurrentPage] = useState(1);
     const [entriesPerPage, setEntriesPerPage] = useState<number>(10);
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [addForm, setAddForm] = useState<IngredientForm>(defaultForm);
     const [isAdding, setIsAdding] = useState(false);
-    const [isAddStatusMenuOpen, setIsAddStatusMenuOpen] = useState(false);
-    const [addStatusSearch, setAddStatusSearch] = useState('');
-    const addStatusMenuRef = useRef<HTMLDivElement | null>(null);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [editItemId, setEditItemId] = useState<number | null>(null);
     const [editForm, setEditForm] = useState<IngredientForm>(defaultForm);
     const [isEditing, setIsEditing] = useState(false);
-    const [isEditStatusMenuOpen, setIsEditStatusMenuOpen] = useState(false);
-    const [editStatusSearch, setEditStatusSearch] = useState('');
-    const editStatusMenuRef = useRef<HTMLDivElement | null>(null);
     const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-    const [deleteTarget, setDeleteTarget] = useState<DeleteDialogTarget | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<DeleteDialogTarget | null>(
+        null,
+    );
 
     useEffect(() => {
         setItems(ingredients);
     }, [ingredients]);
-
-    useEffect(() => {
-        const onPointerDown = (event: MouseEvent) => {
-            if (
-                isAddStatusMenuOpen &&
-                addStatusMenuRef.current &&
-                !addStatusMenuRef.current.contains(event.target as Node)
-            ) {
-                setIsAddStatusMenuOpen(false);
-            }
-
-            if (
-                isEditStatusMenuOpen &&
-                editStatusMenuRef.current &&
-                !editStatusMenuRef.current.contains(event.target as Node)
-            ) {
-                setIsEditStatusMenuOpen(false);
-            }
-        };
-
-        if (isAddStatusMenuOpen || isEditStatusMenuOpen) {
-            document.addEventListener('mousedown', onPointerDown);
-        }
-
-        return () => {
-            document.removeEventListener('mousedown', onPointerDown);
-        };
-    }, [isAddStatusMenuOpen, isEditStatusMenuOpen]);
 
     const filteredItems = useMemo(() => {
         const normalizedQuery = search.trim().toLowerCase();
@@ -364,7 +371,7 @@ export default function Inventory({
                 item.quantity,
                 item.unit,
                 item.storage,
-                item.status,
+                deriveStatusFromQuantity(item.quantity),
             ]
                 .join(' ')
                 .toLowerCase()
@@ -372,29 +379,69 @@ export default function Inventory({
         );
     }, [items, search]);
 
+    const sortedItems = useMemo(() => {
+        if (!sortField) {
+            return filteredItems;
+        }
+
+        const getSortValue = (item: InventoryItem): string | number => {
+            switch (sortField) {
+                case 'name':
+                    return item.name;
+                case 'code':
+                    return item.code;
+                case 'category':
+                    return item.category;
+                case 'quantity':
+                    return item.quantity;
+                case 'unit':
+                    return item.unit;
+                case 'storage':
+                    return item.storage;
+                case 'status':
+                    return deriveStatusFromQuantity(item.quantity);
+            }
+        };
+
+        return [...filteredItems].sort((a, b) => {
+            const aValue = getSortValue(a);
+            const bValue = getSortValue(b);
+
+            let comparison = 0;
+            if (typeof aValue === 'number' && typeof bValue === 'number') {
+                comparison = aValue - bValue;
+            } else {
+                comparison = String(aValue).localeCompare(
+                    String(bValue),
+                    undefined,
+                    {
+                        numeric: true,
+                        sensitivity: 'base',
+                    },
+                );
+            }
+
+            if (comparison === 0) {
+                comparison = b.id - a.id;
+            }
+
+            return sortDirection === 'asc' ? comparison : -comparison;
+        });
+    }, [filteredItems, sortDirection, sortField]);
+
     const totalPages = Math.max(
         1,
-        Math.ceil(filteredItems.length / entriesPerPage),
+        Math.ceil(sortedItems.length / entriesPerPage),
     );
 
     const paginatedItems = useMemo(() => {
         const start = (currentPage - 1) * entriesPerPage;
-        return filteredItems.slice(start, start + entriesPerPage);
-    }, [currentPage, entriesPerPage, filteredItems]);
+        return sortedItems.slice(start, start + entriesPerPage);
+    }, [currentPage, entriesPerPage, sortedItems]);
 
     const startItem =
-        filteredItems.length === 0 ? 0 : (currentPage - 1) * entriesPerPage + 1;
-    const endItem = Math.min(
-        currentPage * entriesPerPage,
-        filteredItems.length,
-    );
-    const filteredAddStatuses = statusOptions.filter((status) =>
-        status.toLowerCase().includes(addStatusSearch.trim().toLowerCase()),
-    );
-    const filteredEditStatuses = statusOptions.filter((status) =>
-        status.toLowerCase().includes(editStatusSearch.trim().toLowerCase()),
-    );
-
+        sortedItems.length === 0 ? 0 : (currentPage - 1) * entriesPerPage + 1;
+    const endItem = Math.min(currentPage * entriesPerPage, sortedItems.length);
     const handleSearchChange = (value: string) => {
         setSearch(value);
         setCurrentPage(1);
@@ -417,11 +464,33 @@ export default function Inventory({
         setCurrentPage(1);
     };
 
+    const handleSort = (field: SortField) => {
+        setCurrentPage(1);
+
+        if (sortField === field) {
+            setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
+            return;
+        }
+
+        setSortField(field);
+        setSortDirection('asc');
+    };
+
+    const renderSortIcon = (field: SortField) => {
+        if (sortField !== field) {
+            return <ChevronsUpDown className="size-3.5 opacity-45" />;
+        }
+
+        if (sortDirection === 'asc') {
+            return <ChevronUp className="size-3.5" />;
+        }
+
+        return <ChevronDown className="size-3.5" />;
+    };
+
     const handleAddDialogOpenChange = (open: boolean) => {
         setIsAddDialogOpen(open);
         if (!open) {
-            setIsAddStatusMenuOpen(false);
-            setAddStatusSearch('');
             setAddForm(defaultForm);
         }
     };
@@ -430,8 +499,6 @@ export default function Inventory({
         setIsEditDialogOpen(open);
         if (!open) {
             setEditItemId(null);
-            setIsEditStatusMenuOpen(false);
-            setEditStatusSearch('');
             setEditForm(defaultForm);
         }
     };
@@ -439,20 +506,31 @@ export default function Inventory({
     const handleAddFieldChange =
         (field: keyof IngredientForm) =>
         (event: ChangeEvent<HTMLInputElement>) => {
-            setAddForm((current) => ({ ...current, [field]: event.target.value }));
+            setAddForm((current) => ({
+                ...current,
+                [field]: event.target.value,
+            }));
         };
 
     const handleEditFieldChange =
         (field: keyof IngredientForm) =>
         (event: ChangeEvent<HTMLInputElement>) => {
-            setEditForm((current) => ({ ...current, [field]: event.target.value }));
+            setEditForm((current) => ({
+                ...current,
+                [field]: event.target.value,
+            }));
         };
 
     const handleAddQuantityChange = (event: ChangeEvent<HTMLInputElement>) => {
         const value = event.target.value.trim();
 
         if (/^\d*$/.test(value)) {
-            setAddForm((current) => ({ ...current, quantity: value }));
+            const normalizedQuantity = toNormalizedQuantity(value);
+            setAddForm((current) => ({
+                ...current,
+                quantity: value,
+                status: deriveStatusFromQuantity(normalizedQuantity),
+            }));
         }
     };
 
@@ -460,55 +538,48 @@ export default function Inventory({
         const value = event.target.value.trim();
 
         if (/^\d*$/.test(value)) {
-            setEditForm((current) => ({ ...current, quantity: value }));
+            const normalizedQuantity = toNormalizedQuantity(value);
+            setEditForm((current) => ({
+                ...current,
+                quantity: value,
+                status: deriveStatusFromQuantity(normalizedQuantity),
+            }));
         }
-    };
-
-    const handleAddStatusSelect = (status: InventoryStatus) => {
-        setAddForm((current) => ({ ...current, status }));
-        setAddStatusSearch('');
-        setIsAddStatusMenuOpen(false);
-    };
-
-    const handleEditStatusSelect = (status: InventoryStatus) => {
-        setEditForm((current) => ({ ...current, status }));
-        setEditStatusSearch('');
-        setIsEditStatusMenuOpen(false);
     };
 
     const handleAddIngredient = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
-        const quantity = Number.parseInt(addForm.quantity, 10);
-        const normalizedQuantity = Number.isFinite(quantity)
-            ? Math.max(0, quantity)
-            : 0;
+        const normalizedQuantity = toNormalizedQuantity(addForm.quantity);
+        const status = deriveStatusFromQuantity(normalizedQuantity);
 
         setIsAdding(true);
-        router.post('/inventory/ingredients', {
-            name: normalizeName(addForm.name),
-            category_id: Number.parseInt(addForm.categoryId, 10),
-            quantity: normalizedQuantity,
-            unit_id: Number.parseInt(addForm.unitId, 10),
-            storage_id: Number.parseInt(addForm.storageId, 10),
-            status: addForm.status,
-        }, {
-            preserveScroll: true,
-            onSuccess: () => {
-                toast.success('Ingredient added successfully.');
-                setCurrentPage(1);
-                handleAddDialogOpenChange(false);
+        router.post(
+            '/inventory/ingredients',
+            {
+                name: normalizeName(addForm.name),
+                category_id: Number.parseInt(addForm.categoryId, 10),
+                quantity: normalizedQuantity,
+                unit_id: Number.parseInt(addForm.unitId, 10),
+                storage_id: Number.parseInt(addForm.storageId, 10),
+                status,
             },
-            onError: (errors) => toast.error(getFirstErrorMessage(errors)),
-            onFinish: () => setIsAdding(false),
-        });
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    toast.success('Ingredient added successfully.');
+                    setCurrentPage(1);
+                    handleAddDialogOpenChange(false);
+                },
+                onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+                onFinish: () => setIsAdding(false),
+            },
+        );
     };
 
     const openEditDialog = (item: InventoryItem) => {
         setEditItemId(item.id);
         setEditForm(toIngredientForm(item));
-        setIsEditStatusMenuOpen(false);
-        setEditStatusSearch('');
         setIsEditDialogOpen(true);
     };
 
@@ -519,28 +590,30 @@ export default function Inventory({
             return;
         }
 
-        const quantity = Number.parseInt(editForm.quantity, 10);
-        const normalizedQuantity = Number.isFinite(quantity)
-            ? Math.max(0, quantity)
-            : 0;
+        const normalizedQuantity = toNormalizedQuantity(editForm.quantity);
+        const status = deriveStatusFromQuantity(normalizedQuantity);
 
         setIsEditing(true);
-        router.put(`/inventory/ingredients/${editItemId}`, {
-            name: normalizeName(editForm.name),
-            category_id: Number.parseInt(editForm.categoryId, 10),
-            quantity: normalizedQuantity,
-            unit_id: Number.parseInt(editForm.unitId, 10),
-            storage_id: Number.parseInt(editForm.storageId, 10),
-            status: editForm.status,
-        }, {
-            preserveScroll: true,
-            onSuccess: () => {
-                toast.success('Ingredient updated successfully.');
-                handleEditDialogOpenChange(false);
+        router.put(
+            `/inventory/ingredients/${editItemId}`,
+            {
+                name: normalizeName(editForm.name),
+                category_id: Number.parseInt(editForm.categoryId, 10),
+                quantity: normalizedQuantity,
+                unit_id: Number.parseInt(editForm.unitId, 10),
+                storage_id: Number.parseInt(editForm.storageId, 10),
+                status,
             },
-            onError: (errors) => toast.error(getFirstErrorMessage(errors)),
-            onFinish: () => setIsEditing(false),
-        });
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    toast.success('Ingredient updated successfully.');
+                    handleEditDialogOpenChange(false);
+                },
+                onError: (errors) => toast.error(getFirstErrorMessage(errors)),
+                onFinish: () => setIsEditing(false),
+            },
+        );
     };
 
     const handleDeleteIngredient = () => {
@@ -593,11 +666,14 @@ export default function Inventory({
                             Ingredient Inventory
                         </CardTitle>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            Track ingredient stock levels,
-                            and manage storage records quickly.
+                            Track ingredient stock levels, and manage storage
+                            records quickly.
                         </p>
                     </div>
-                    <Dialog open={isAddDialogOpen} onOpenChange={handleAddDialogOpenChange}>
+                    <Dialog
+                        open={isAddDialogOpen}
+                        onOpenChange={handleAddDialogOpenChange}
+                    >
                         <DialogTrigger asChild>
                             <Button className="w-full gap-2 sm:w-auto">
                                 <Plus className="size-4" />
@@ -606,7 +682,9 @@ export default function Inventory({
                         </DialogTrigger>
                         <DialogContent
                             className="sm:max-w-2xl"
-                            onInteractOutside={(event) => event.preventDefault()}
+                            onInteractOutside={(event) =>
+                                event.preventDefault()
+                            }
                         >
                             <DialogHeader>
                                 <DialogTitle>Add Ingredient</DialogTitle>
@@ -616,14 +694,21 @@ export default function Inventory({
                                 </DialogDescription>
                             </DialogHeader>
 
-                            <form onSubmit={handleAddIngredient} className="space-y-4">
+                            <form
+                                onSubmit={handleAddIngredient}
+                                className="space-y-4"
+                            >
                                 <div className="grid gap-4 sm:grid-cols-2">
                                     <div className="space-y-2 sm:col-span-2">
-                                        <Label htmlFor="ingredient-name">Name</Label>
+                                        <Label htmlFor="ingredient-name">
+                                            Name
+                                        </Label>
                                         <Input
                                             id="ingredient-name"
                                             value={addForm.name}
-                                            onChange={handleAddFieldChange('name')}
+                                            onChange={handleAddFieldChange(
+                                                'name',
+                                            )}
                                             placeholder="e.g. Basil Leaves"
                                         />
                                     </div>
@@ -691,79 +776,16 @@ export default function Inventory({
                                         }
                                     />
 
-                                    <div className="relative space-y-2 sm:col-span-2" ref={addStatusMenuRef}>
-                                        <Label htmlFor="ingredient-status">
-                                            Status
-                                        </Label>
-                                        <Button
-                                            id="ingredient-status"
-                                            type="button"
-                                            variant="outline"
-                                            className="w-full justify-between font-normal"
-                                            onClick={() =>
-                                                setIsAddStatusMenuOpen((open) => !open)
-                                            }
-                                        >
-                                            <span
-                                                className={cn(
-                                                    !addForm.status &&
-                                                        'text-muted-foreground',
-                                                )}
-                                            >
-                                                {addForm.status || 'Select status'}
-                                            </span>
-                                            <ChevronsUpDown className="size-4 opacity-50" />
-                                        </Button>
-
-                                        {isAddStatusMenuOpen ? (
-                                            <div className="bg-popover text-popover-foreground absolute z-20 mt-1 w-full rounded-md border shadow-md">
-                                                <div className="border-b p-2">
-                                                    <Input
-                                                        value={addStatusSearch}
-                                                        onChange={(event) =>
-                                                            setAddStatusSearch(
-                                                                event.target.value,
-                                                            )
-                                                        }
-                                                        placeholder="Search status..."
-                                                        className="h-8"
-                                                    />
-                                                </div>
-                                                <div className="max-h-44 overflow-y-auto p-1">
-                                                    {filteredAddStatuses.length === 0 ? (
-                                                        <p className="px-2 py-1.5 text-sm text-muted-foreground">
-                                                            No status found.
-                                                        </p>
-                                                    ) : (
-                                                        filteredAddStatuses.map(
-                                                            (status) => (
-                                                                <button
-                                                                    key={status}
-                                                                    type="button"
-                                                                    className="hover:bg-accent hover:text-accent-foreground flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-sm"
-                                                                    onClick={() =>
-                                                                        handleAddStatusSelect(
-                                                                            status,
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    {status}
-                                                                    <Check
-                                                                        className={cn(
-                                                                            'size-4',
-                                                                            addForm.status ===
-                                                                                status
-                                                                                ? 'opacity-100'
-                                                                                : 'opacity-0',
-                                                                        )}
-                                                                    />
-                                                                </button>
-                                                            ),
-                                                        )
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ) : null}
+                                    <div className="space-y-2 sm:col-span-2">
+                                        <Label>Status</Label>
+                                        <div className="flex h-10 items-center rounded-md border border-border/70 px-3">
+                                            {getStatusBadge(addForm.status)}
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Automatic based on quantity: 0 = Out
+                                            of Stock, 1-5 = Low Stock, 6+ = In
+                                            Stock.
+                                        </p>
                                     </div>
                                 </div>
 
@@ -778,7 +800,10 @@ export default function Inventory({
                                     >
                                         Cancel
                                     </Button>
-                                    <Button type="submit" disabled={isAddDisabled || isAdding}>
+                                    <Button
+                                        type="submit"
+                                        disabled={isAddDisabled || isAdding}
+                                    >
                                         {isAdding ? (
                                             <>
                                                 <Loader2 className="mr-2 size-4 animate-spin" />
@@ -792,10 +817,15 @@ export default function Inventory({
                             </form>
                         </DialogContent>
                     </Dialog>
-                    <Dialog open={isEditDialogOpen} onOpenChange={handleEditDialogOpenChange}>
+                    <Dialog
+                        open={isEditDialogOpen}
+                        onOpenChange={handleEditDialogOpenChange}
+                    >
                         <DialogContent
                             className="sm:max-w-2xl"
-                            onInteractOutside={(event) => event.preventDefault()}
+                            onInteractOutside={(event) =>
+                                event.preventDefault()
+                            }
                         >
                             <DialogHeader>
                                 <DialogTitle>Edit Ingredient</DialogTitle>
@@ -805,14 +835,21 @@ export default function Inventory({
                                 </DialogDescription>
                             </DialogHeader>
 
-                            <form onSubmit={handleEditIngredient} className="space-y-4">
+                            <form
+                                onSubmit={handleEditIngredient}
+                                className="space-y-4"
+                            >
                                 <div className="grid gap-4 sm:grid-cols-2">
                                     <div className="space-y-2 sm:col-span-2">
-                                        <Label htmlFor="edit-ingredient-name">Name</Label>
+                                        <Label htmlFor="edit-ingredient-name">
+                                            Name
+                                        </Label>
                                         <Input
                                             id="edit-ingredient-name"
                                             value={editForm.name}
-                                            onChange={handleEditFieldChange('name')}
+                                            onChange={handleEditFieldChange(
+                                                'name',
+                                            )}
                                             placeholder="e.g. Basil Leaves"
                                         />
                                     </div>
@@ -880,79 +917,16 @@ export default function Inventory({
                                         }
                                     />
 
-                                    <div className="relative space-y-2 sm:col-span-2" ref={editStatusMenuRef}>
-                                        <Label htmlFor="edit-ingredient-status">
-                                            Status
-                                        </Label>
-                                        <Button
-                                            id="edit-ingredient-status"
-                                            type="button"
-                                            variant="outline"
-                                            className="w-full justify-between font-normal"
-                                            onClick={() =>
-                                                setIsEditStatusMenuOpen((open) => !open)
-                                            }
-                                        >
-                                            <span
-                                                className={cn(
-                                                    !editForm.status &&
-                                                        'text-muted-foreground',
-                                                )}
-                                            >
-                                                {editForm.status || 'Select status'}
-                                            </span>
-                                            <ChevronsUpDown className="size-4 opacity-50" />
-                                        </Button>
-
-                                        {isEditStatusMenuOpen ? (
-                                            <div className="bg-popover text-popover-foreground absolute z-20 mt-1 w-full rounded-md border shadow-md">
-                                                <div className="border-b p-2">
-                                                    <Input
-                                                        value={editStatusSearch}
-                                                        onChange={(event) =>
-                                                            setEditStatusSearch(
-                                                                event.target.value,
-                                                            )
-                                                        }
-                                                        placeholder="Search status..."
-                                                        className="h-8"
-                                                    />
-                                                </div>
-                                                <div className="max-h-44 overflow-y-auto p-1">
-                                                    {filteredEditStatuses.length === 0 ? (
-                                                        <p className="px-2 py-1.5 text-sm text-muted-foreground">
-                                                            No status found.
-                                                        </p>
-                                                    ) : (
-                                                        filteredEditStatuses.map(
-                                                            (status) => (
-                                                                <button
-                                                                    key={status}
-                                                                    type="button"
-                                                                    className="hover:bg-accent hover:text-accent-foreground flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-sm"
-                                                                    onClick={() =>
-                                                                        handleEditStatusSelect(
-                                                                            status,
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    {status}
-                                                                    <Check
-                                                                        className={cn(
-                                                                            'size-4',
-                                                                            editForm.status ===
-                                                                                status
-                                                                                ? 'opacity-100'
-                                                                                : 'opacity-0',
-                                                                        )}
-                                                                    />
-                                                                </button>
-                                                            ),
-                                                        )
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ) : null}
+                                    <div className="space-y-2 sm:col-span-2">
+                                        <Label>Status</Label>
+                                        <div className="flex h-10 items-center rounded-md border border-border/70 px-3">
+                                            {getStatusBadge(editForm.status)}
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Automatic based on quantity: 0 = Out
+                                            of Stock, 1-5 = Low Stock, 6+ = In
+                                            Stock.
+                                        </p>
                                     </div>
                                 </div>
 
@@ -967,7 +941,10 @@ export default function Inventory({
                                     >
                                         Cancel
                                     </Button>
-                                    <Button type="submit" disabled={isEditDisabled || isEditing}>
+                                    <Button
+                                        type="submit"
+                                        disabled={isEditDisabled || isEditing}
+                                    >
                                         {isEditing ? (
                                             <>
                                                 <Loader2 className="mr-2 size-4 animate-spin" />
@@ -997,14 +974,17 @@ export default function Inventory({
                             />
                         </div>
                         <div className="flex items-center gap-2 self-end sm:self-auto">
-                            <Label htmlFor="entries-per-page" className="text-sm text-muted-foreground">
+                            <Label
+                                htmlFor="entries-per-page"
+                                className="text-sm text-muted-foreground"
+                            >
                                 Show entries
                             </Label>
                             <select
                                 id="entries-per-page"
                                 value={entriesPerPage}
                                 onChange={handleEntriesPerPageChange}
-                                className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 w-20 rounded-md border px-3 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
+                                className="inline-flex h-9 w-20 rounded-md border border-input bg-background px-3 text-sm shadow-xs ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden"
                             >
                                 {entriesPerPageOptions.map((option) => (
                                     <option key={option} value={option}>
@@ -1023,25 +1003,80 @@ export default function Inventory({
                                         Seq
                                     </th>
                                     <th className="px-4 py-3 font-medium">
-                                        Name
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1"
+                                            onClick={() => handleSort('name')}
+                                        >
+                                            Name
+                                            {renderSortIcon('name')}
+                                        </button>
                                     </th>
                                     <th className="px-4 py-3 font-medium">
-                                        Code
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1"
+                                            onClick={() => handleSort('code')}
+                                        >
+                                            Code
+                                            {renderSortIcon('code')}
+                                        </button>
                                     </th>
                                     <th className="px-4 py-3 font-medium">
-                                        Category
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1"
+                                            onClick={() =>
+                                                handleSort('category')
+                                            }
+                                        >
+                                            Category
+                                            {renderSortIcon('category')}
+                                        </button>
                                     </th>
                                     <th className="px-4 py-3 font-medium">
-                                        Qty
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1"
+                                            onClick={() =>
+                                                handleSort('quantity')
+                                            }
+                                        >
+                                            Qty
+                                            {renderSortIcon('quantity')}
+                                        </button>
                                     </th>
                                     <th className="px-4 py-3 font-medium">
-                                        Unit
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1"
+                                            onClick={() => handleSort('unit')}
+                                        >
+                                            Unit
+                                            {renderSortIcon('unit')}
+                                        </button>
                                     </th>
                                     <th className="px-4 py-3 font-medium">
-                                        Storage
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1"
+                                            onClick={() =>
+                                                handleSort('storage')
+                                            }
+                                        >
+                                            Storage
+                                            {renderSortIcon('storage')}
+                                        </button>
                                     </th>
                                     <th className="px-4 py-3 font-medium">
-                                        Status
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1"
+                                            onClick={() => handleSort('status')}
+                                        >
+                                            Status
+                                            {renderSortIcon('status')}
+                                        </button>
                                     </th>
                                     <th className="px-4 py-3 font-medium">
                                         Added by
@@ -1058,8 +1093,7 @@ export default function Inventory({
                                             colSpan={10}
                                             className="px-4 py-8 text-center text-muted-foreground"
                                         >
-                                            No ingredient matched your
-                                            search.
+                                            No ingredient matched your search.
                                         </td>
                                     </tr>
                                 ) : (
@@ -1069,7 +1103,8 @@ export default function Inventory({
                                             className="border-t border-border/70"
                                         >
                                             <td className="px-4 py-3 text-muted-foreground">
-                                                {(currentPage - 1) * entriesPerPage +
+                                                {(currentPage - 1) *
+                                                    entriesPerPage +
                                                     index +
                                                     1}
                                             </td>
@@ -1092,10 +1127,15 @@ export default function Inventory({
                                                 {item.storage}
                                             </td>
                                             <td className="px-4 py-3">
-                                                {getStatusBadge(item.status)}
+                                                {getStatusBadge(
+                                                    deriveStatusFromQuantity(
+                                                        item.quantity,
+                                                    ),
+                                                )}
                                             </td>
                                             <td className="px-4 py-3 text-muted-foreground">
-                                                {item.created_by_name ?? 'System'}
+                                                {item.created_by_name ??
+                                                    'System'}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center justify-end gap-2">
@@ -1107,7 +1147,11 @@ export default function Inventory({
                                                                 size="icon"
                                                                 className="size-8"
                                                                 aria-label={`Edit ${item.name}`}
-                                                                onClick={() => openEditDialog(item)}
+                                                                onClick={() =>
+                                                                    openEditDialog(
+                                                                        item,
+                                                                    )
+                                                                }
                                                             >
                                                                 <Pencil className="size-4" />
                                                             </Button>
@@ -1124,8 +1168,15 @@ export default function Inventory({
                                                                 size="icon"
                                                                 className="size-8 text-destructive hover:text-destructive"
                                                                 aria-label={`Delete ${item.name}`}
-                                                                onClick={() => openDeleteDialog(item)}
-                                                                disabled={deletingItemId === item.id}
+                                                                onClick={() =>
+                                                                    openDeleteDialog(
+                                                                        item,
+                                                                    )
+                                                                }
+                                                                disabled={
+                                                                    deletingItemId ===
+                                                                    item.id
+                                                                }
                                                             >
                                                                 <Trash2 className="size-4" />
                                                             </Button>
@@ -1168,7 +1219,11 @@ export default function Inventory({
                                                 {item.code}
                                             </p>
                                         </div>
-                                        {getStatusBadge(item.status)}
+                                        {getStatusBadge(
+                                            deriveStatusFromQuantity(
+                                                item.quantity,
+                                            ),
+                                        )}
                                     </div>
                                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                                         <p>Category: {item.category}</p>
@@ -1176,7 +1231,8 @@ export default function Inventory({
                                         <p>Unit: {item.unit}</p>
                                         <p>Storage: {item.storage}</p>
                                         <p className="col-span-2">
-                                            Added by: {item.created_by_name ?? 'System'}
+                                            Added by:{' '}
+                                            {item.created_by_name ?? 'System'}
                                         </p>
                                     </div>
                                     <div className="mt-4 flex justify-end gap-2">
@@ -1187,13 +1243,17 @@ export default function Inventory({
                                                     variant="outline"
                                                     size="sm"
                                                     className="gap-1"
-                                                    onClick={() => openEditDialog(item)}
+                                                    onClick={() =>
+                                                        openEditDialog(item)
+                                                    }
                                                 >
                                                     <Pencil className="size-3.5" />
                                                     Edit
                                                 </Button>
                                             </TooltipTrigger>
-                                            <TooltipContent>Edit</TooltipContent>
+                                            <TooltipContent>
+                                                Edit
+                                            </TooltipContent>
                                         </Tooltip>
                                         <Tooltip>
                                             <TooltipTrigger asChild>
@@ -1202,14 +1262,21 @@ export default function Inventory({
                                                     variant="outline"
                                                     size="sm"
                                                     className="gap-1 text-destructive hover:text-destructive"
-                                                    onClick={() => openDeleteDialog(item)}
-                                                    disabled={deletingItemId === item.id}
+                                                    onClick={() =>
+                                                        openDeleteDialog(item)
+                                                    }
+                                                    disabled={
+                                                        deletingItemId ===
+                                                        item.id
+                                                    }
                                                 >
                                                     <Trash2 className="size-3.5" />
                                                     Delete
                                                 </Button>
                                             </TooltipTrigger>
-                                            <TooltipContent>Delete</TooltipContent>
+                                            <TooltipContent>
+                                                Delete
+                                            </TooltipContent>
                                         </Tooltip>
                                     </div>
                                 </div>
@@ -1221,7 +1288,7 @@ export default function Inventory({
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Package className="size-4" />
                             Showing {startItem}-{endItem} of{' '}
-                            {filteredItems.length} ingredients
+                            {sortedItems.length} ingredients
                         </div>
 
                         <div className="flex items-center gap-2 self-end sm:self-auto">

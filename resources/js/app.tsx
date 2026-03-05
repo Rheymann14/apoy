@@ -24,6 +24,7 @@ createInertiaApp({
                 <Toaster richColors position="top-right" />
             </StrictMode>,
         );
+          delete el.dataset.page;
     },
     progress: {
         color: '#4B5563',
