@@ -1,13 +1,5 @@
 import { Head, Link, router } from '@inertiajs/react';
 import {
-    Document,
-    Page,
-    StyleSheet,
-    Text,
-    View,
-    pdf,
-} from '@react-pdf/renderer';
-import {
     ArrowRight,
     Boxes,
     GripVertical,
@@ -93,7 +85,6 @@ type DashboardPageProps = {
     dailyAdded: ChartPoint[];
     categoryChart: ChartPoint[];
     recentIngredients: RecentIngredient[];
-    inventoryItems: InventoryItem[];
 };
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -109,7 +100,6 @@ const dashboardRealtimeKeys = [
     'dailyAdded',
     'categoryChart',
     'recentIngredients',
-    'inventoryItems',
 ] as const;
 const dashboardRefreshIntervalMs = 5000;
 
@@ -298,302 +288,6 @@ const categoryBarPalette = [
     '#ccd2c5',
     '#d9ddd2',
 ];
-
-const reportPdfStyles = StyleSheet.create({
-    page: {
-        paddingHorizontal: 24,
-        paddingVertical: 22,
-        fontSize: 10,
-        color: '#111827',
-    },
-    title: {
-        fontSize: 14,
-        fontWeight: 700,
-        marginBottom: 4,
-    },
-    meta: {
-        color: '#4b5563',
-        marginBottom: 10,
-    },
-    table: {
-        borderWidth: 1,
-        borderColor: '#d1d5db',
-    },
-    row: {
-        flexDirection: 'row',
-    },
-    headerRow: {
-        backgroundColor: '#f3f4f6',
-        borderBottomWidth: 1,
-        borderBottomColor: '#d1d5db',
-    },
-    bodyRow: {
-        borderBottomWidth: 1,
-        borderBottomColor: '#e5e7eb',
-    },
-    bodyRowAlt: {
-        backgroundColor: '#fafafa',
-    },
-    cell: {
-        paddingHorizontal: 5,
-        paddingVertical: 4,
-        borderRightWidth: 1,
-        borderRightColor: '#d1d5db',
-    },
-    lastCell: {
-        borderRightWidth: 0,
-    },
-    headerCellText: {
-        fontSize: 9,
-        fontWeight: 700,
-    },
-    bodyCellText: {
-        fontSize: 9,
-    },
-    emptyState: {
-        paddingVertical: 10,
-        textAlign: 'center',
-        color: '#6b7280',
-    },
-    colSeq: {
-        width: '7%',
-    },
-    colName: {
-        width: '23%',
-    },
-    colCode: {
-        width: '12%',
-    },
-    colCategory: {
-        width: '16%',
-    },
-    colQty: {
-        width: '8%',
-    },
-    colUnit: {
-        width: '10%',
-    },
-    colStorage: {
-        width: '14%',
-    },
-    colStatus: {
-        width: '10%',
-    },
-});
-
-type InventoryStatusReportDocumentProps = {
-    status: InventoryStatus;
-    items: InventoryItem[];
-    generatedAt: string;
-};
-
-function InventoryStatusReportDocument({
-    status,
-    items,
-    generatedAt,
-}: InventoryStatusReportDocumentProps) {
-    return (
-        <Document>
-            <Page size="A4" style={reportPdfStyles.page}>
-                <Text style={reportPdfStyles.title}>
-                    {status} Inventory Report
-                </Text>
-                <Text style={reportPdfStyles.meta}>
-                    Generated: {generatedAt} | Total Items: {items.length}
-                </Text>
-
-                <View style={reportPdfStyles.table}>
-                    <View
-                        style={[reportPdfStyles.row, reportPdfStyles.headerRow]}
-                    >
-                        <View
-                            style={[
-                                reportPdfStyles.cell,
-                                reportPdfStyles.colSeq,
-                            ]}
-                        >
-                            <Text style={reportPdfStyles.headerCellText}>
-                                Seq
-                            </Text>
-                        </View>
-                        <View
-                            style={[
-                                reportPdfStyles.cell,
-                                reportPdfStyles.colName,
-                            ]}
-                        >
-                            <Text style={reportPdfStyles.headerCellText}>
-                                Name
-                            </Text>
-                        </View>
-                        <View
-                            style={[
-                                reportPdfStyles.cell,
-                                reportPdfStyles.colCode,
-                            ]}
-                        >
-                            <Text style={reportPdfStyles.headerCellText}>
-                                Code
-                            </Text>
-                        </View>
-                        <View
-                            style={[
-                                reportPdfStyles.cell,
-                                reportPdfStyles.colCategory,
-                            ]}
-                        >
-                            <Text style={reportPdfStyles.headerCellText}>
-                                Category
-                            </Text>
-                        </View>
-                        <View
-                            style={[
-                                reportPdfStyles.cell,
-                                reportPdfStyles.colQty,
-                            ]}
-                        >
-                            <Text style={reportPdfStyles.headerCellText}>
-                                Qty
-                            </Text>
-                        </View>
-                        <View
-                            style={[
-                                reportPdfStyles.cell,
-                                reportPdfStyles.colUnit,
-                            ]}
-                        >
-                            <Text style={reportPdfStyles.headerCellText}>
-                                Unit
-                            </Text>
-                        </View>
-                        <View
-                            style={[
-                                reportPdfStyles.cell,
-                                reportPdfStyles.colStorage,
-                            ]}
-                        >
-                            <Text style={reportPdfStyles.headerCellText}>
-                                Storage
-                            </Text>
-                        </View>
-                        <View
-                            style={[
-                                reportPdfStyles.cell,
-                                reportPdfStyles.lastCell,
-                                reportPdfStyles.colStatus,
-                            ]}
-                        >
-                            <Text style={reportPdfStyles.headerCellText}>
-                                Status
-                            </Text>
-                        </View>
-                    </View>
-
-                    {items.length === 0 ? (
-                        <Text style={reportPdfStyles.emptyState}>
-                            No items found.
-                        </Text>
-                    ) : (
-                        items.map((item, index) => (
-                            <View
-                                key={item.id}
-                                style={[
-                                    reportPdfStyles.row,
-                                    reportPdfStyles.bodyRow,
-                                    ...(index % 2 === 1
-                                        ? [reportPdfStyles.bodyRowAlt]
-                                        : []),
-                                ]}
-                            >
-                                <View
-                                    style={[
-                                        reportPdfStyles.cell,
-                                        reportPdfStyles.colSeq,
-                                    ]}
-                                >
-                                    <Text style={reportPdfStyles.bodyCellText}>
-                                        {index + 1}
-                                    </Text>
-                                </View>
-                                <View
-                                    style={[
-                                        reportPdfStyles.cell,
-                                        reportPdfStyles.colName,
-                                    ]}
-                                >
-                                    <Text style={reportPdfStyles.bodyCellText}>
-                                        {item.name}
-                                    </Text>
-                                </View>
-                                <View
-                                    style={[
-                                        reportPdfStyles.cell,
-                                        reportPdfStyles.colCode,
-                                    ]}
-                                >
-                                    <Text style={reportPdfStyles.bodyCellText}>
-                                        {item.code}
-                                    </Text>
-                                </View>
-                                <View
-                                    style={[
-                                        reportPdfStyles.cell,
-                                        reportPdfStyles.colCategory,
-                                    ]}
-                                >
-                                    <Text style={reportPdfStyles.bodyCellText}>
-                                        {item.category}
-                                    </Text>
-                                </View>
-                                <View
-                                    style={[
-                                        reportPdfStyles.cell,
-                                        reportPdfStyles.colQty,
-                                    ]}
-                                >
-                                    <Text style={reportPdfStyles.bodyCellText}>
-                                        {item.quantity}
-                                    </Text>
-                                </View>
-                                <View
-                                    style={[
-                                        reportPdfStyles.cell,
-                                        reportPdfStyles.colUnit,
-                                    ]}
-                                >
-                                    <Text style={reportPdfStyles.bodyCellText}>
-                                        {item.unit}
-                                    </Text>
-                                </View>
-                                <View
-                                    style={[
-                                        reportPdfStyles.cell,
-                                        reportPdfStyles.colStorage,
-                                    ]}
-                                >
-                                    <Text style={reportPdfStyles.bodyCellText}>
-                                        {item.storage}
-                                    </Text>
-                                </View>
-                                <View
-                                    style={[
-                                        reportPdfStyles.cell,
-                                        reportPdfStyles.lastCell,
-                                        reportPdfStyles.colStatus,
-                                    ]}
-                                >
-                                    <Text style={reportPdfStyles.bodyCellText}>
-                                        {item.status}
-                                    </Text>
-                                </View>
-                            </View>
-                        ))
-                    )}
-                </View>
-            </Page>
-        </Document>
-    );
-}
 
 const getStatusBadge = (status: InventoryStatus) => {
     if (status === 'Out of Stock') {
@@ -1139,7 +833,6 @@ export default function Dashboard({
     dailyAdded,
     categoryChart,
     recentIngredients,
-    inventoryItems,
 }: DashboardPageProps) {
     const metricCardsRef = useRef<HTMLDivElement | null>(null);
     const insightCardsRef = useRef<HTMLDivElement | null>(null);
@@ -1369,39 +1062,51 @@ export default function Dashboard({
         previewWindow.document.body.innerHTML =
             '<p style="font-family: Arial, sans-serif; padding: 16px;">Generating report...</p>';
 
-        const filteredItems = inventoryItems
-            .filter((item) => item.status === status)
-            .sort((a, b) => {
-                const byName = a.name.localeCompare(b.name, undefined, {
-                    numeric: true,
-                    sensitivity: 'base',
-                });
+        try {
+            const response = await window.fetch(
+                `/dashboard/reports/status?status=${encodeURIComponent(status)}`,
+                {
+                    headers: {
+                        Accept: 'application/json',
+                    },
+                    credentials: 'same-origin',
+                },
+            );
 
-                if (byName !== 0) {
-                    return byName;
-                }
+            if (!response.ok) {
+                throw new Error(`Failed to load report data (${response.status})`);
+            }
 
-                return a.code.localeCompare(b.code, undefined, {
-                    numeric: true,
-                    sensitivity: 'base',
-                });
-            });
+            const { items } = (await response.json()) as {
+                items: InventoryItem[];
+            };
+            const [
+                { pdf },
+                { InventoryStatusReportDocument },
+            ] = await Promise.all([
+                import('@react-pdf/renderer'),
+                import('@/features/dashboard/inventory-status-report-document'),
+            ]);
+            const generatedAt = new Date().toLocaleString();
+            const reportDocument = (
+                <InventoryStatusReportDocument
+                    status={status}
+                    items={items}
+                    generatedAt={generatedAt}
+                />
+            );
+            const blob = await pdf(reportDocument).toBlob();
+            const url = URL.createObjectURL(blob);
+            previewWindow.location.href = url;
 
-        const generatedAt = new Date().toLocaleString();
-        const reportDocument = (
-            <InventoryStatusReportDocument
-                status={status}
-                items={filteredItems}
-                generatedAt={generatedAt}
-            />
-        );
-        const blob = await pdf(reportDocument).toBlob();
-        const url = URL.createObjectURL(blob);
-        previewWindow.location.href = url;
-
-        window.setTimeout(() => {
-            URL.revokeObjectURL(url);
-        }, 60_000);
+            window.setTimeout(() => {
+                URL.revokeObjectURL(url);
+            }, 60_000);
+        } catch {
+            previewWindow.document.title = 'Unable to generate report';
+            previewWindow.document.body.innerHTML =
+                '<p style="font-family: Arial, sans-serif; padding: 16px;">Unable to generate the report right now. Please try again.</p>';
+        }
     };
 
     const insightCards = [

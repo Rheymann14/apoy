@@ -17,10 +17,38 @@ use Inertia\Response;
 class ManagementController extends Controller
 {
     /**
+     * Supported management tabs.
+     *
+     * @var list<string>
+     */
+    private const TABS = ['account', 'category', 'unit', 'storage'];
+
+    /**
      * Show the management page.
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
+        $validated = $request->validate([
+            'active_tab' => ['nullable', 'string', Rule::in(self::TABS)],
+            'account_search' => ['nullable', 'string', 'max:100'],
+            'account_per_page' => ['nullable', 'integer', Rule::in(['10', '50', '100'])],
+            'category_search' => ['nullable', 'string', 'max:100'],
+            'category_per_page' => ['nullable', 'integer', Rule::in(['10', '50', '100'])],
+            'unit_search' => ['nullable', 'string', 'max:100'],
+            'unit_per_page' => ['nullable', 'integer', Rule::in(['10', '50', '100'])],
+            'storage_search' => ['nullable', 'string', 'max:100'],
+            'storage_per_page' => ['nullable', 'integer', Rule::in(['10', '50', '100'])],
+        ]);
+        $activeTab = $validated['active_tab'] ?? 'account';
+        $accountSearch = trim((string) ($validated['account_search'] ?? ''));
+        $categorySearch = trim((string) ($validated['category_search'] ?? ''));
+        $unitSearch = trim((string) ($validated['unit_search'] ?? ''));
+        $storageSearch = trim((string) ($validated['storage_search'] ?? ''));
+        $accountPerPage = (int) ($validated['account_per_page'] ?? 10);
+        $categoryPerPage = (int) ($validated['category_per_page'] ?? 10);
+        $unitPerPage = (int) ($validated['unit_per_page'] ?? 10);
+        $storagePerPage = (int) ($validated['storage_per_page'] ?? 10);
+
         $roles = Role::query()
             ->whereIn('slug', ['admin', 'employee'])
             ->orderByRaw("CASE slug WHEN 'admin' THEN 0 WHEN 'employee' THEN 1 ELSE 2 END")
@@ -33,57 +61,92 @@ class ManagementController extends Controller
             ->values();
 
         $users = User::query()
-            ->with('role:id,name,slug')
-            ->select(['id', 'name', 'email', 'role_id'])
-            ->orderBy('id')
-            ->get()
-            ->map(fn (User $user) => [
+            ->leftJoin('roles', 'users.role_id', '=', 'roles.id')
+            ->select(['users.id', 'users.name', 'users.email', 'users.role_id'])
+            ->selectRaw('roles.name as role_name')
+            ->selectRaw('roles.slug as role_slug')
+            ->when($accountSearch !== '', function ($query) use ($accountSearch) {
+                $query->where(function ($innerQuery) use ($accountSearch) {
+                    $innerQuery
+                        ->where('users.name', 'like', "%{$accountSearch}%")
+                        ->orWhere('users.email', 'like', "%{$accountSearch}%")
+                        ->orWhere('roles.name', 'like', "%{$accountSearch}%")
+                        ->orWhere('roles.slug', 'like', "%{$accountSearch}%");
+                });
+            })
+            ->orderBy('users.id')
+            ->paginate($accountPerPage, ['*'], 'account_page')
+            ->withQueryString()
+            ->through(fn (User $user) => [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'role' => $user->role?->name ?? 'Employee',
-                'role_slug' => $user->role?->slug ?? 'employee',
-            ])
-            ->values();
+                'role' => (string) ($user->role_name ?? 'Employee'),
+                'role_slug' => (string) ($user->role_slug ?? 'employee'),
+            ]);
 
         $categories = Category::query()
-            ->with('creator:id,name')
-            ->select(['id', 'name', 'created_by'])
-            ->orderBy('name')
-            ->get()
-            ->map(fn (Category $category) => [
+            ->leftJoin('users as creators', 'categories.created_by', '=', 'creators.id')
+            ->select(['categories.id', 'categories.name', 'categories.created_by'])
+            ->selectRaw('creators.name as created_by_name')
+            ->when($categorySearch !== '', function ($query) use ($categorySearch) {
+                $query->where(function ($innerQuery) use ($categorySearch) {
+                    $innerQuery
+                        ->where('categories.name', 'like', "%{$categorySearch}%")
+                        ->orWhere('creators.name', 'like', "%{$categorySearch}%");
+                });
+            })
+            ->orderBy('categories.name')
+            ->paginate($categoryPerPage, ['*'], 'category_page')
+            ->withQueryString()
+            ->through(fn (Category $category) => [
                 'id' => $category->id,
                 'name' => $category->name,
                 'created_by' => $category->created_by,
-                'created_by_name' => $category->creator?->name,
-            ])
-            ->values();
+                'created_by_name' => $category->created_by_name,
+            ]);
 
         $units = Unit::query()
-            ->with('creator:id,name')
-            ->select(['id', 'name', 'created_by'])
-            ->orderBy('name')
-            ->get()
-            ->map(fn (Unit $unit) => [
+            ->leftJoin('users as creators', 'units.created_by', '=', 'creators.id')
+            ->select(['units.id', 'units.name', 'units.created_by'])
+            ->selectRaw('creators.name as created_by_name')
+            ->when($unitSearch !== '', function ($query) use ($unitSearch) {
+                $query->where(function ($innerQuery) use ($unitSearch) {
+                    $innerQuery
+                        ->where('units.name', 'like', "%{$unitSearch}%")
+                        ->orWhere('creators.name', 'like', "%{$unitSearch}%");
+                });
+            })
+            ->orderBy('units.name')
+            ->paginate($unitPerPage, ['*'], 'unit_page')
+            ->withQueryString()
+            ->through(fn (Unit $unit) => [
                 'id' => $unit->id,
                 'name' => $unit->name,
                 'created_by' => $unit->created_by,
-                'created_by_name' => $unit->creator?->name,
-            ])
-            ->values();
+                'created_by_name' => $unit->created_by_name,
+            ]);
 
         $storages = Storage::query()
-            ->with('creator:id,name')
-            ->select(['id', 'name', 'created_by'])
-            ->orderBy('name')
-            ->get()
-            ->map(fn (Storage $storage) => [
+            ->leftJoin('users as creators', 'storages.created_by', '=', 'creators.id')
+            ->select(['storages.id', 'storages.name', 'storages.created_by'])
+            ->selectRaw('creators.name as created_by_name')
+            ->when($storageSearch !== '', function ($query) use ($storageSearch) {
+                $query->where(function ($innerQuery) use ($storageSearch) {
+                    $innerQuery
+                        ->where('storages.name', 'like', "%{$storageSearch}%")
+                        ->orWhere('creators.name', 'like', "%{$storageSearch}%");
+                });
+            })
+            ->orderBy('storages.name')
+            ->paginate($storagePerPage, ['*'], 'storage_page')
+            ->withQueryString()
+            ->through(fn (Storage $storage) => [
                 'id' => $storage->id,
                 'name' => $storage->name,
                 'created_by' => $storage->created_by,
-                'created_by_name' => $storage->creator?->name,
-            ])
-            ->values();
+                'created_by_name' => $storage->created_by_name,
+            ]);
 
         return Inertia::render('management', [
             'roles' => $roles,
@@ -91,6 +154,17 @@ class ManagementController extends Controller
             'categories' => $categories,
             'units' => $units,
             'storages' => $storages,
+            'filters' => [
+                'active_tab' => $activeTab,
+                'account_search' => $accountSearch,
+                'account_per_page' => $accountPerPage,
+                'category_search' => $categorySearch,
+                'category_per_page' => $categoryPerPage,
+                'unit_search' => $unitSearch,
+                'unit_per_page' => $unitPerPage,
+                'storage_search' => $storageSearch,
+                'storage_per_page' => $storagePerPage,
+            ],
         ]);
     }
 
@@ -116,7 +190,7 @@ class ManagementController extends Controller
             'role_id' => $role->id,
         ]);
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**
@@ -146,7 +220,7 @@ class ManagementController extends Controller
             'role_id' => $role->id,
         ]);
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**
@@ -158,7 +232,7 @@ class ManagementController extends Controller
             'password' => Hash::make('apoy1234'),
         ]);
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**
@@ -179,7 +253,7 @@ class ManagementController extends Controller
             'created_by' => $request->user()?->id,
         ]);
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**
@@ -204,7 +278,7 @@ class ManagementController extends Controller
             'name' => $validated['name'],
         ]);
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**
@@ -214,7 +288,7 @@ class ManagementController extends Controller
     {
         $category->delete();
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**
@@ -235,7 +309,7 @@ class ManagementController extends Controller
             'created_by' => $request->user()?->id,
         ]);
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**
@@ -260,7 +334,7 @@ class ManagementController extends Controller
             'name' => $validated['name'],
         ]);
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**
@@ -270,7 +344,7 @@ class ManagementController extends Controller
     {
         $unit->delete();
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**
@@ -291,7 +365,7 @@ class ManagementController extends Controller
             'created_by' => $request->user()?->id,
         ]);
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**
@@ -316,7 +390,7 @@ class ManagementController extends Controller
             'name' => $validated['name'],
         ]);
 
-        return to_route('management');
+        return redirect()->back();
     }
 
     /**

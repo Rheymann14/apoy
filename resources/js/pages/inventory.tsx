@@ -1,16 +1,16 @@
 import { Head, Link, router } from '@inertiajs/react';
 import {
     Check,
-    ChevronLeft,
     ChevronDown,
+    ChevronLeft,
     ChevronRight,
     ChevronUp,
     ChevronsUpDown,
+    History,
     Loader2,
     Package,
     Pencil,
     Plus,
-    History,
     Search,
     Trash2,
 } from 'lucide-react';
@@ -72,18 +72,6 @@ type IngredientForm = {
     status: InventoryStatus;
 };
 
-type InventoryPageProps = {
-    categories: InventoryOption[];
-    units: InventoryOption[];
-    storages: InventoryOption[];
-    ingredients: InventoryItem[];
-};
-
-type DeleteDialogTarget = {
-    id: number;
-    name: string;
-};
-
 type SortField =
     | 'name'
     | 'code'
@@ -93,6 +81,36 @@ type SortField =
     | 'storage'
     | 'status';
 type SortDirection = 'asc' | 'desc';
+
+type PaginatedIngredients = {
+    data: InventoryItem[];
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+    from: number | null;
+    to: number | null;
+};
+
+type Filters = {
+    search: string;
+    sort: SortField | null;
+    direction: SortDirection;
+    per_page: number;
+};
+
+type InventoryPageProps = {
+    categories: InventoryOption[];
+    units: InventoryOption[];
+    storages: InventoryOption[];
+    ingredients: PaginatedIngredients;
+    filters: Filters;
+};
+
+type DeleteDialogTarget = {
+    id: number;
+    name: string;
+};
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -106,6 +124,7 @@ const breadcrumbs: BreadcrumbItem[] = [
 ];
 
 const entriesPerPageOptions = [10, 50, 100] as const;
+
 const deriveStatusFromQuantity = (quantity: number): InventoryStatus => {
     if (quantity === 0) {
         return 'Out of Stock';
@@ -138,7 +157,7 @@ const toIngredientForm = (item: InventoryItem): IngredientForm => ({
     quantity: String(item.quantity),
     unitId: String(item.unit_id),
     storageId: String(item.storage_id),
-    status: deriveStatusFromQuantity(item.quantity),
+    status: item.status,
 });
 
 const normalizeName = (value: string) => value.trim().replace(/\s+/g, ' ');
@@ -333,13 +352,9 @@ export default function Inventory({
     units,
     storages,
     ingredients,
+    filters,
 }: InventoryPageProps) {
-    const [items, setItems] = useState<InventoryItem[]>(ingredients);
-    const [search, setSearch] = useState('');
-    const [sortField, setSortField] = useState<SortField | null>(null);
-    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-    const [currentPage, setCurrentPage] = useState(1);
-    const [entriesPerPage, setEntriesPerPage] = useState<number>(10);
+    const [search, setSearch] = useState(filters.search ?? '');
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [addForm, setAddForm] = useState<IngredientForm>(defaultForm);
     const [isAdding, setIsAdding] = useState(false);
@@ -354,135 +369,83 @@ export default function Inventory({
     );
 
     useEffect(() => {
-        setItems(ingredients);
-    }, [ingredients]);
+        setSearch(filters.search ?? '');
+    }, [filters.search]);
 
-    const filteredItems = useMemo(() => {
-        const normalizedQuery = search.trim().toLowerCase();
-
-        if (!normalizedQuery) {
-            return items;
-        }
-
-        return items.filter((item) =>
-            [
-                item.name,
-                item.code,
-                item.category,
-                item.quantity,
-                item.unit,
-                item.storage,
-                deriveStatusFromQuantity(item.quantity),
-            ]
-                .join(' ')
-                .toLowerCase()
-                .includes(normalizedQuery),
+    const requestInventory = (
+        params: Partial<{
+            search: string | undefined;
+            sort: SortField | undefined;
+            direction: SortDirection | undefined;
+            per_page: number;
+            page: number;
+        }>,
+    ) => {
+        router.get(
+            '/inventory',
+            {
+                search: filters.search || undefined,
+                sort: filters.sort || undefined,
+                direction: filters.sort ? filters.direction : undefined,
+                per_page: filters.per_page,
+                ...params,
+            },
+            {
+                preserveScroll: true,
+                preserveState: true,
+                replace: true,
+            },
         );
-    }, [items, search]);
+    };
 
-    const sortedItems = useMemo(() => {
-        if (!sortField) {
-            return filteredItems;
+    useEffect(() => {
+        const normalizedSearch = search.trim();
+        if (normalizedSearch === filters.search) {
+            return;
         }
 
-        const getSortValue = (item: InventoryItem): string | number => {
-            switch (sortField) {
-                case 'name':
-                    return item.name;
-                case 'code':
-                    return item.code;
-                case 'category':
-                    return item.category;
-                case 'quantity':
-                    return item.quantity;
-                case 'unit':
-                    return item.unit;
-                case 'storage':
-                    return item.storage;
-                case 'status':
-                    return deriveStatusFromQuantity(item.quantity);
-            }
-        };
+        const timeoutId = window.setTimeout(() => {
+            requestInventory({
+                search: normalizedSearch || undefined,
+                page: 1,
+            });
+        }, 300);
 
-        return [...filteredItems].sort((a, b) => {
-            const aValue = getSortValue(a);
-            const bValue = getSortValue(b);
-
-            let comparison = 0;
-            if (typeof aValue === 'number' && typeof bValue === 'number') {
-                comparison = aValue - bValue;
-            } else {
-                comparison = String(aValue).localeCompare(
-                    String(bValue),
-                    undefined,
-                    {
-                        numeric: true,
-                        sensitivity: 'base',
-                    },
-                );
-            }
-
-            if (comparison === 0) {
-                comparison = b.id - a.id;
-            }
-
-            return sortDirection === 'asc' ? comparison : -comparison;
-        });
-    }, [filteredItems, sortDirection, sortField]);
-
-    const totalPages = Math.max(
-        1,
-        Math.ceil(sortedItems.length / entriesPerPage),
-    );
-
-    const paginatedItems = useMemo(() => {
-        const start = (currentPage - 1) * entriesPerPage;
-        return sortedItems.slice(start, start + entriesPerPage);
-    }, [currentPage, entriesPerPage, sortedItems]);
-
-    const startItem =
-        sortedItems.length === 0 ? 0 : (currentPage - 1) * entriesPerPage + 1;
-    const endItem = Math.min(currentPage * entriesPerPage, sortedItems.length);
-    const handleSearchChange = (value: string) => {
-        setSearch(value);
-        setCurrentPage(1);
-    };
-
-    const openDeleteDialog = (item: InventoryItem) => {
-        setDeleteTarget({ id: item.id, name: item.name });
-        setIsDeleteDialogOpen(true);
-    };
-
-    const closeDeleteDialog = () => {
-        setIsDeleteDialogOpen(false);
-        setDeleteTarget(null);
-    };
+        return () => window.clearTimeout(timeoutId);
+    }, [filters.search, search]);
 
     const handleEntriesPerPageChange = (
         event: ChangeEvent<HTMLSelectElement>,
     ) => {
-        setEntriesPerPage(Number.parseInt(event.target.value, 10));
-        setCurrentPage(1);
+        requestInventory({
+            per_page: Number.parseInt(event.target.value, 10),
+            page: 1,
+        });
     };
 
     const handleSort = (field: SortField) => {
-        setCurrentPage(1);
-
-        if (sortField === field) {
-            setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
+        if (filters.sort === field) {
+            requestInventory({
+                sort: field,
+                direction: filters.direction === 'asc' ? 'desc' : 'asc',
+                page: 1,
+            });
             return;
         }
 
-        setSortField(field);
-        setSortDirection('asc');
+        requestInventory({
+            sort: field,
+            direction: 'asc',
+            page: 1,
+        });
     };
 
     const renderSortIcon = (field: SortField) => {
-        if (sortField !== field) {
+        if (filters.sort !== field) {
             return <ChevronsUpDown className="size-3.5 opacity-45" />;
         }
 
-        if (sortDirection === 'asc') {
+        if (filters.direction === 'asc') {
             return <ChevronUp className="size-3.5" />;
         }
 
@@ -569,7 +532,6 @@ export default function Inventory({
                 preserveScroll: true,
                 onSuccess: () => {
                     toast.success('Ingredient added successfully.');
-                    setCurrentPage(1);
                     handleAddDialogOpenChange(false);
                 },
                 onError: (errors) => toast.error(getFirstErrorMessage(errors)),
@@ -617,6 +579,16 @@ export default function Inventory({
         );
     };
 
+    const openDeleteDialog = (item: InventoryItem) => {
+        setDeleteTarget({ id: item.id, name: item.name });
+        setIsDeleteDialogOpen(true);
+    };
+
+    const closeDeleteDialog = () => {
+        setIsDeleteDialogOpen(false);
+        setDeleteTarget(null);
+    };
+
     const handleDeleteIngredient = () => {
         if (!deleteTarget) {
             return;
@@ -634,6 +606,10 @@ export default function Inventory({
         });
     };
 
+    const goToPage = (page: number) => {
+        requestInventory({ page });
+    };
+
     const isAddDisabled =
         !normalizeName(addForm.name) ||
         !addForm.categoryId ||
@@ -647,14 +623,11 @@ export default function Inventory({
         !editForm.quantity.trim() ||
         !editForm.unitId ||
         !editForm.storageId;
-
-    const goToPreviousPage = () => {
-        setCurrentPage((page) => Math.max(1, page - 1));
-    };
-
-    const goToNextPage = () => {
-        setCurrentPage((page) => Math.min(totalPages, page + 1));
-    };
+    const hasNoResults = ingredients.data.length === 0;
+    const emptyMessage =
+        filters.search.trim() !== ''
+            ? 'No ingredient matched your search.'
+            : 'No ingredients found.';
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -980,7 +953,7 @@ export default function Inventory({
                             <Input
                                 value={search}
                                 onChange={(event) =>
-                                    handleSearchChange(event.target.value)
+                                    setSearch(event.target.value)
                                 }
                                 placeholder="Search by name, code, category, storage..."
                                 className="pl-9"
@@ -995,7 +968,7 @@ export default function Inventory({
                             </Label>
                             <select
                                 id="entries-per-page"
-                                value={entriesPerPage}
+                                value={String(filters.per_page)}
                                 onChange={handleEntriesPerPageChange}
                                 className="inline-flex h-9 w-20 rounded-md border border-input bg-background px-3 text-sm shadow-xs ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden"
                             >
@@ -1100,26 +1073,24 @@ export default function Inventory({
                                 </tr>
                             </thead>
                             <tbody>
-                                {paginatedItems.length === 0 ? (
+                                {hasNoResults ? (
                                     <tr>
                                         <td
                                             colSpan={10}
                                             className="px-4 py-8 text-center text-muted-foreground"
                                         >
-                                            No ingredient matched your search.
+                                            {emptyMessage}
                                         </td>
                                     </tr>
                                 ) : (
-                                    paginatedItems.map((item, index) => (
+                                    ingredients.data.map((item, index) => (
                                         <tr
                                             key={item.id}
                                             className="border-t border-border/70"
                                         >
                                             <td className="px-4 py-3 text-muted-foreground">
-                                                {(currentPage - 1) *
-                                                    entriesPerPage +
-                                                    index +
-                                                    1}
+                                                {(ingredients.from ?? 1) +
+                                                    index}
                                             </td>
                                             <td className="px-4 py-3 font-medium">
                                                 {item.name}
@@ -1140,11 +1111,7 @@ export default function Inventory({
                                                 {item.storage}
                                             </td>
                                             <td className="px-4 py-3">
-                                                {getStatusBadge(
-                                                    deriveStatusFromQuantity(
-                                                        item.quantity,
-                                                    ),
-                                                )}
+                                                {getStatusBadge(item.status)}
                                             </td>
                                             <td className="px-4 py-3 text-muted-foreground">
                                                 {item.created_by_name ??
@@ -1208,12 +1175,12 @@ export default function Inventory({
                     </div>
 
                     <div className="space-y-3 md:hidden">
-                        {paginatedItems.length === 0 ? (
+                        {hasNoResults ? (
                             <div className="rounded-lg border border-border/70 p-5 text-center text-sm text-muted-foreground">
-                                No ingredient matched your search.
+                                {emptyMessage}
                             </div>
                         ) : (
-                            paginatedItems.map((item, index) => (
+                            ingredients.data.map((item, index) => (
                                 <div
                                     key={item.id}
                                     className="rounded-lg border border-border/70 bg-background/70 p-4"
@@ -1222,21 +1189,15 @@ export default function Inventory({
                                         <div>
                                             <p className="font-medium">
                                                 #{' '}
-                                                {(currentPage - 1) *
-                                                    entriesPerPage +
-                                                    index +
-                                                    1}{' '}
+                                                {(ingredients.from ?? 1) +
+                                                    index}{' '}
                                                 {item.name}
                                             </p>
                                             <p className="text-xs text-muted-foreground">
                                                 {item.code}
                                             </p>
                                         </div>
-                                        {getStatusBadge(
-                                            deriveStatusFromQuantity(
-                                                item.quantity,
-                                            ),
-                                        )}
+                                        {getStatusBadge(item.status)}
                                     </div>
                                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                                         <p>Category: {item.category}</p>
@@ -1300,8 +1261,8 @@ export default function Inventory({
                     <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Package className="size-4" />
-                            Showing {startItem}-{endItem} of{' '}
-                            {sortedItems.length} ingredients
+                            Showing {ingredients.from ?? 0}-{ingredients.to ?? 0}{' '}
+                            of {ingredients.total} ingredients
                         </div>
 
                         <div className="flex items-center gap-2 self-end sm:self-auto">
@@ -1309,21 +1270,29 @@ export default function Inventory({
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={goToPreviousPage}
-                                disabled={currentPage <= 1}
+                                onClick={() =>
+                                    goToPage(ingredients.current_page - 1)
+                                }
+                                disabled={ingredients.current_page <= 1}
                             >
                                 <ChevronLeft className="size-4" />
                                 Prev
                             </Button>
                             <span className="text-sm text-muted-foreground">
-                                Page {currentPage} of {totalPages}
+                                Page {ingredients.current_page} of{' '}
+                                {ingredients.last_page}
                             </span>
                             <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={goToNextPage}
-                                disabled={currentPage >= totalPages}
+                                onClick={() =>
+                                    goToPage(ingredients.current_page + 1)
+                                }
+                                disabled={
+                                    ingredients.current_page >=
+                                    ingredients.last_page
+                                }
                             >
                                 Next
                                 <ChevronRight className="size-4" />

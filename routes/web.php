@@ -9,6 +9,8 @@ Route::redirect('/', '/login')->name('home');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('dashboard/reports/status', [DashboardController::class, 'statusReport'])
+        ->name('dashboard.reports.status');
     Route::get('inventory', [InventoryController::class, 'index'])->name('inventory');
     Route::get('inventory/changes', [InventoryController::class, 'changes'])
         ->name('inventory.changes');

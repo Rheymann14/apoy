@@ -11,7 +11,7 @@ import {
     UserCog,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,7 +39,6 @@ import { dashboard } from '@/routes';
 import type { BreadcrumbItem } from '@/types';
 
 type ManagementTab = 'account' | 'category' | 'unit' | 'storage';
-type LocalTab = Exclude<ManagementTab, 'account' | 'category'>;
 
 type RoleOption = {
     id: number;
@@ -62,27 +61,6 @@ type LocalManagementItem = {
     created_by_name: string | null;
 };
 
-type CategoryItem = {
-    id: number;
-    name: string;
-    created_by: number | null;
-    created_by_name: string | null;
-};
-
-type UnitItem = {
-    id: number;
-    name: string;
-    created_by: number | null;
-    created_by_name: string | null;
-};
-
-type StorageItem = {
-    id: number;
-    name: string;
-    created_by: number | null;
-    created_by_name: string | null;
-};
-
 type AccountForm = {
     name: string;
     email: string;
@@ -90,17 +68,40 @@ type AccountForm = {
 };
 
 type DeleteDialogTarget = {
-    type: 'account' | 'category' | 'unit' | 'storage';
+    type: ManagementTab;
     id: number;
     name: string;
 };
 
+type PaginatedData<T> = {
+    data: T[];
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+    from: number | null;
+    to: number | null;
+};
+
+type ManagementFilters = {
+    active_tab: ManagementTab;
+    account_search: string;
+    account_per_page: number;
+    category_search: string;
+    category_per_page: number;
+    unit_search: string;
+    unit_per_page: number;
+    storage_search: string;
+    storage_per_page: number;
+};
+
 type ManagementPageProps = {
     roles: RoleOption[];
-    users: AccountUser[];
-    categories: CategoryItem[];
-    units: UnitItem[];
-    storages: StorageItem[];
+    users: PaginatedData<AccountUser>;
+    categories: PaginatedData<LocalManagementItem>;
+    units: PaginatedData<LocalManagementItem>;
+    storages: PaginatedData<LocalManagementItem>;
+    filters: ManagementFilters;
 };
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -119,35 +120,35 @@ const tabs: {
     label: string;
     description: string;
     inputLabel: string;
-    initialItems: string[];
+    searchPlaceholder: string;
 }[] = [
     {
         value: 'account',
         label: 'Account',
         description: 'Manage user records and role access.',
         inputLabel: 'Account name',
-        initialItems: [],
+        searchPlaceholder: 'Search name, email, or role...',
     },
     {
         value: 'category',
         label: 'Category',
         description: 'Define ingredient categories used in inventory.',
         inputLabel: 'Category name',
-        initialItems: [],
+        searchPlaceholder: 'Search category or added by...',
     },
     {
         value: 'unit',
         label: 'Unit',
         description: 'Maintain measurement units for item quantities.',
         inputLabel: 'Unit name',
-        initialItems: [],
+        searchPlaceholder: 'Search unit or added by...',
     },
     {
         value: 'storage',
         label: 'Storage',
         description: 'Configure storage areas and stock locations.',
         inputLabel: 'Storage name',
-        initialItems: [],
+        searchPlaceholder: 'Search storage or added by...',
     },
 ];
 
@@ -157,6 +158,8 @@ const tabIcons = {
     unit: Ruler,
     storage: Building2,
 } as const;
+
+const entriesPerPageOptions = [10, 50, 100] as const;
 
 const getFirstErrorMessage = (errors: unknown) => {
     if (!errors || typeof errors !== 'object') {
@@ -197,31 +200,17 @@ export default function Management({
     categories,
     units,
     storages,
+    filters,
 }: ManagementPageProps) {
-    const [activeTab, setActiveTab] = useState<ManagementTab>('account');
-    const [localTabItems, setLocalTabItems] =
-        useState<Record<LocalTab, LocalManagementItem[]>>({
-            unit: units.map(({ id, name, created_by, created_by_name }) => ({
-                id,
-                name,
-                created_by,
-                created_by_name,
-            })),
-            storage: storages.map(({ id, name, created_by, created_by_name }) => ({
-                id,
-                name,
-                created_by,
-                created_by_name,
-            })),
-        });
-    const [accountUsers, setAccountUsers] = useState<AccountUser[]>(users);
-    const [categoryItems, setCategoryItems] = useState<CategoryItem[]>(categories);
+    const activeTab = filters.active_tab;
+    const activeTabData = tabs.find((tab) => tab.value === activeTab) ?? tabs[0];
+    const ActiveIcon = tabIcons[activeTab];
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [addLocalValue, setAddLocalValue] = useState('');
     const [editLocalValue, setEditLocalValue] = useState('');
     const [editLocalTarget, setEditLocalTarget] = useState<{
-        tab: LocalTab;
+        tab: Exclude<ManagementTab, 'account'>;
         id: number;
     } | null>(null);
     const [addAccountForm, setAddAccountForm] = useState<AccountForm>({
@@ -235,50 +224,21 @@ export default function Management({
         role: 'employee',
     });
     const [editAccountUserId, setEditAccountUserId] = useState<number | null>(null);
-    const [editCategoryId, setEditCategoryId] = useState<number | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [resettingUserId, setResettingUserId] = useState<number | null>(null);
-    const [accountSearch, setAccountSearch] = useState('');
-    const [accountPage, setAccountPage] = useState(1);
-    const [accountPageSize, setAccountPageSize] = useState(10);
-    const [categorySearch, setCategorySearch] = useState('');
-    const [categoryPage, setCategoryPage] = useState(1);
-    const [categoryPageSize, setCategoryPageSize] = useState(10);
-    const [unitSearch, setUnitSearch] = useState('');
-    const [unitPage, setUnitPage] = useState(1);
-    const [unitPageSize, setUnitPageSize] = useState(10);
-    const [storageSearch, setStorageSearch] = useState('');
-    const [storagePage, setStoragePage] = useState(1);
-    const [storagePageSize, setStoragePageSize] = useState(10);
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [deleteDialogTarget, setDeleteDialogTarget] =
         useState<DeleteDialogTarget | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [accountSearch, setAccountSearch] = useState(filters.account_search);
+    const [categorySearch, setCategorySearch] = useState(filters.category_search);
+    const [unitSearch, setUnitSearch] = useState(filters.unit_search);
+    const [storageSearch, setStorageSearch] = useState(filters.storage_search);
 
-    useEffect(() => {
-        setAccountUsers(users);
-    }, [users]);
-
-    useEffect(() => {
-        setCategoryItems(categories);
-    }, [categories]);
-
-    useEffect(() => {
-        setLocalTabItems({
-            unit: units.map(({ id, name, created_by, created_by_name }) => ({
-                id,
-                name,
-                created_by,
-                created_by_name,
-            })),
-            storage: storages.map(({ id, name, created_by, created_by_name }) => ({
-                id,
-                name,
-                created_by,
-                created_by_name,
-            })),
-        });
-    }, [units, storages]);
+    useEffect(() => setAccountSearch(filters.account_search), [filters.account_search]);
+    useEffect(() => setCategorySearch(filters.category_search), [filters.category_search]);
+    useEffect(() => setUnitSearch(filters.unit_search), [filters.unit_search]);
+    useEffect(() => setStorageSearch(filters.storage_search), [filters.storage_search]);
 
     const defaultRoleSlug = useMemo(() => {
         const employeeRole = roles.find((role) => role.slug === 'employee');
@@ -293,155 +253,126 @@ export default function Management({
         }));
     }, [defaultRoleSlug]);
 
-    const activeTabData = useMemo(
-        () => tabs.find((tab) => tab.value === activeTab) ?? tabs[0],
-        [activeTab],
-    );
-    const ActiveIcon = tabIcons[activeTabData.value];
-    const isAccountTab = activeTab === 'account';
-    const isCategoryTab = activeTab === 'category';
-    const isUnitTab = activeTab === 'unit';
-    const isStorageTab = activeTab === 'storage';
-    const filteredAccountUsers = useMemo(() => {
-        const query = accountSearch.trim().toLowerCase();
-        if (!query) {
-            return accountUsers;
-        }
-
-        return accountUsers.filter((user) => {
-            const searchable = `${user.name} ${user.email} ${user.role}`.toLowerCase();
-            return searchable.includes(query);
-        });
-    }, [accountUsers, accountSearch]);
-    const totalAccountPages = useMemo(
-        () => Math.max(1, Math.ceil(filteredAccountUsers.length / accountPageSize)),
-        [filteredAccountUsers.length, accountPageSize],
-    );
-    const paginatedAccountUsers = useMemo(() => {
-        const startIndex = (accountPage - 1) * accountPageSize;
-        return filteredAccountUsers.slice(startIndex, startIndex + accountPageSize);
-    }, [filteredAccountUsers, accountPage, accountPageSize]);
-    const accountEntryStart =
-        filteredAccountUsers.length === 0 ? 0 : (accountPage - 1) * accountPageSize + 1;
-    const accountEntryEnd =
-        filteredAccountUsers.length === 0
-            ? 0
-            : Math.min(accountPage * accountPageSize, filteredAccountUsers.length);
-    const filteredCategoryItems = useMemo(() => {
-        const query = categorySearch.trim().toLowerCase();
-        if (!query) {
-            return categoryItems;
-        }
-
-        return categoryItems.filter((item) => {
-            const searchable = `${item.name} ${item.created_by_name ?? ''}`.toLowerCase();
-            return searchable.includes(query);
-        });
-    }, [categoryItems, categorySearch]);
-    const totalCategoryPages = useMemo(
-        () => Math.max(1, Math.ceil(filteredCategoryItems.length / categoryPageSize)),
-        [filteredCategoryItems.length, categoryPageSize],
-    );
-    const paginatedCategoryItems = useMemo(() => {
-        const startIndex = (categoryPage - 1) * categoryPageSize;
-        return filteredCategoryItems.slice(startIndex, startIndex + categoryPageSize);
-    }, [filteredCategoryItems, categoryPage, categoryPageSize]);
-    const categoryEntryStart =
-        filteredCategoryItems.length === 0 ? 0 : (categoryPage - 1) * categoryPageSize + 1;
-    const categoryEntryEnd =
-        filteredCategoryItems.length === 0
-            ? 0
-            : Math.min(categoryPage * categoryPageSize, filteredCategoryItems.length);
-    const filteredUnitItems = useMemo(() => {
-        const query = unitSearch.trim().toLowerCase();
-        if (!query) {
-            return localTabItems.unit;
-        }
-
-        return localTabItems.unit.filter((item) => {
-            const searchable = `${item.name} ${item.created_by_name ?? ''}`.toLowerCase();
-            return searchable.includes(query);
-        });
-    }, [localTabItems.unit, unitSearch]);
-    const totalUnitPages = useMemo(
-        () => Math.max(1, Math.ceil(filteredUnitItems.length / unitPageSize)),
-        [filteredUnitItems.length, unitPageSize],
-    );
-    const paginatedUnitItems = useMemo(() => {
-        const startIndex = (unitPage - 1) * unitPageSize;
-        return filteredUnitItems.slice(startIndex, startIndex + unitPageSize);
-    }, [filteredUnitItems, unitPage, unitPageSize]);
-    const unitEntryStart =
-        filteredUnitItems.length === 0 ? 0 : (unitPage - 1) * unitPageSize + 1;
-    const unitEntryEnd =
-        filteredUnitItems.length === 0
-            ? 0
-            : Math.min(unitPage * unitPageSize, filteredUnitItems.length);
-    const filteredStorageItems = useMemo(() => {
-        const query = storageSearch.trim().toLowerCase();
-        if (!query) {
-            return localTabItems.storage;
-        }
-
-        return localTabItems.storage.filter((item) => {
-            const searchable = `${item.name} ${item.created_by_name ?? ''}`.toLowerCase();
-            return searchable.includes(query);
-        });
-    }, [localTabItems.storage, storageSearch]);
-    const totalStoragePages = useMemo(
-        () => Math.max(1, Math.ceil(filteredStorageItems.length / storagePageSize)),
-        [filteredStorageItems.length, storagePageSize],
-    );
-    const paginatedStorageItems = useMemo(() => {
-        const startIndex = (storagePage - 1) * storagePageSize;
-        return filteredStorageItems.slice(startIndex, startIndex + storagePageSize);
-    }, [filteredStorageItems, storagePage, storagePageSize]);
-    const storageEntryStart =
-        filteredStorageItems.length === 0 ? 0 : (storagePage - 1) * storagePageSize + 1;
-    const storageEntryEnd =
-        filteredStorageItems.length === 0
-            ? 0
-            : Math.min(storagePage * storagePageSize, filteredStorageItems.length);
-    const activeLocalItems = isUnitTab
-        ? paginatedUnitItems
-        : isStorageTab
-          ? paginatedStorageItems
-          : [];
-    const totalActiveLocalItems =
-        isUnitTab ? localTabItems.unit.length : isStorageTab ? localTabItems.storage.length : 0;
-    const filteredActiveLocalItems =
-        isUnitTab ? filteredUnitItems : isStorageTab ? filteredStorageItems : [];
-    const activeLocalPage = isUnitTab ? unitPage : storagePage;
-    const activeLocalTotalPages = isUnitTab ? totalUnitPages : totalStoragePages;
-    const activeLocalEntryStart =
-        filteredActiveLocalItems.length === 0
-            ? 0
-            : (activeLocalPage - 1) *
-                  (isUnitTab ? unitPageSize : storagePageSize) +
-              1;
-    const activeLocalEntryEnd =
-        filteredActiveLocalItems.length === 0
-            ? 0
-            : Math.min(
-                  activeLocalPage * (isUnitTab ? unitPageSize : storagePageSize),
-                  filteredActiveLocalItems.length,
-              );
+    const requestManagement = (params: Record<string, string | number | undefined>) => {
+        router.get(
+            '/management',
+            {
+                active_tab: filters.active_tab,
+                account_search: filters.account_search || undefined,
+                account_per_page: filters.account_per_page,
+                category_search: filters.category_search || undefined,
+                category_per_page: filters.category_per_page,
+                unit_search: filters.unit_search || undefined,
+                unit_per_page: filters.unit_per_page,
+                storage_search: filters.storage_search || undefined,
+                storage_per_page: filters.storage_per_page,
+                ...params,
+            },
+            {
+                preserveScroll: true,
+                preserveState: true,
+                replace: true,
+            },
+        );
+    };
 
     useEffect(() => {
-        setAccountPage((currentPage) => Math.min(currentPage, totalAccountPages));
-    }, [totalAccountPages]);
+        if (activeTab !== 'account' || accountSearch.trim() === filters.account_search) {
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            requestManagement({
+                active_tab: 'account',
+                account_search: accountSearch.trim() || undefined,
+                account_page: 1,
+            });
+        }, 300);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [accountSearch, activeTab, filters.account_search]);
 
     useEffect(() => {
-        setCategoryPage((currentPage) => Math.min(currentPage, totalCategoryPages));
-    }, [totalCategoryPages]);
+        if (activeTab !== 'category' || categorySearch.trim() === filters.category_search) {
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            requestManagement({
+                active_tab: 'category',
+                category_search: categorySearch.trim() || undefined,
+                category_page: 1,
+            });
+        }, 300);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [categorySearch, activeTab, filters.category_search]);
 
     useEffect(() => {
-        setUnitPage((currentPage) => Math.min(currentPage, totalUnitPages));
-    }, [totalUnitPages]);
+        if (activeTab !== 'unit' || unitSearch.trim() === filters.unit_search) {
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            requestManagement({
+                active_tab: 'unit',
+                unit_search: unitSearch.trim() || undefined,
+                unit_page: 1,
+            });
+        }, 300);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [activeTab, filters.unit_search, unitSearch]);
 
     useEffect(() => {
-        setStoragePage((currentPage) => Math.min(currentPage, totalStoragePages));
-    }, [totalStoragePages]);
+        if (
+            activeTab !== 'storage' ||
+            storageSearch.trim() === filters.storage_search
+        ) {
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            requestManagement({
+                active_tab: 'storage',
+                storage_search: storageSearch.trim() || undefined,
+                storage_page: 1,
+            });
+        }, 300);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [activeTab, filters.storage_search, storageSearch]);
+
+    const activeRecords =
+        activeTab === 'account'
+            ? users
+            : activeTab === 'category'
+              ? categories
+              : activeTab === 'unit'
+                ? units
+                : storages;
+    const activeLocalRecords =
+        activeTab === 'category'
+            ? categories
+            : activeTab === 'unit'
+              ? units
+              : storages;
+    const activeSearch =
+        activeTab === 'account'
+            ? accountSearch
+            : activeTab === 'category'
+              ? categorySearch
+              : activeTab === 'unit'
+                ? unitSearch
+                : storageSearch;
+    const activePerPage =
+        activeTab === 'account'
+            ? filters.account_per_page
+            : activeTab === 'category'
+              ? filters.category_per_page
+              : activeTab === 'unit'
+                ? filters.unit_per_page
+                : filters.storage_per_page;
 
     const closeAddDialog = () => {
         setIsAddDialogOpen(false);
@@ -454,7 +385,6 @@ export default function Management({
         setEditLocalValue('');
         setEditLocalTarget(null);
         setEditAccountUserId(null);
-        setEditCategoryId(null);
         setEditAccountForm({ name: '', email: '', role: defaultRoleSlug });
     };
 
@@ -464,31 +394,28 @@ export default function Management({
     };
 
     const handleTabChange = (tab: ManagementTab) => {
-        setActiveTab(tab);
         closeAddDialog();
         closeEditDialog();
+        requestManagement({
+            active_tab: tab,
+        });
     };
 
     const openAddDialog = () => {
-        if (isAccountTab) {
+        if (activeTab === 'account') {
             setAddAccountForm({ name: '', email: '', role: defaultRoleSlug });
         } else {
             setAddLocalValue('');
         }
+
         setIsAddDialogOpen(true);
     };
 
-    const openEditLocalDialog = (item: LocalManagementItem) => {
-        if (activeTab === 'account' || activeTab === 'category') {
-            return;
-        }
-        setEditLocalTarget({ tab: activeTab, id: item.id });
-        setEditLocalValue(item.name);
-        setIsEditDialogOpen(true);
-    };
-
-    const openEditCategoryDialog = (item: CategoryItem) => {
-        setEditCategoryId(item.id);
+    const openEditLocalDialog = (
+        item: LocalManagementItem,
+        tab: Exclude<ManagementTab, 'account'>,
+    ) => {
+        setEditLocalTarget({ tab, id: item.id });
         setEditLocalValue(item.name);
         setIsEditDialogOpen(true);
     };
@@ -503,34 +430,70 @@ export default function Management({
         setIsEditDialogOpen(true);
     };
 
+    const handleEntriesPerPageChange = (
+        event: ChangeEvent<HTMLSelectElement>,
+    ) => {
+        const nextPerPage = Number.parseInt(event.target.value, 10);
+
+        if (activeTab === 'account') {
+            requestManagement({
+                active_tab: 'account',
+                account_per_page: nextPerPage,
+                account_page: 1,
+            });
+            return;
+        }
+
+        if (activeTab === 'category') {
+            requestManagement({
+                active_tab: 'category',
+                category_per_page: nextPerPage,
+                category_page: 1,
+            });
+            return;
+        }
+
+        if (activeTab === 'unit') {
+            requestManagement({
+                active_tab: 'unit',
+                unit_per_page: nextPerPage,
+                unit_page: 1,
+            });
+            return;
+        }
+
+        requestManagement({
+            active_tab: 'storage',
+            storage_per_page: nextPerPage,
+            storage_page: 1,
+        });
+    };
+
+    const goToPage = (page: number) => {
+        const pageParam =
+            activeTab === 'account'
+                ? 'account_page'
+                : activeTab === 'category'
+                  ? 'category_page'
+                  : activeTab === 'unit'
+                    ? 'unit_page'
+                    : 'storage_page';
+
+        requestManagement({
+            active_tab: activeTab,
+            [pageParam]: page,
+        });
+    };
+
     const handleAdd = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
-        if (isAccountTab) {
+        if (activeTab === 'account') {
             setIsSubmitting(true);
             router.post('/management/users', addAccountForm, {
                 preserveScroll: true,
                 onSuccess: () => {
                     toast.success('User created. Default password is set to apoy1234.');
-                    closeAddDialog();
-                },
-                onError: (errors) => toast.error(getFirstErrorMessage(errors)),
-                onFinish: () => setIsSubmitting(false),
-            });
-            return;
-        }
-
-        if (isCategoryTab) {
-            const nextName = addLocalValue.trim();
-            if (!nextName) {
-                return;
-            }
-
-            setIsSubmitting(true);
-            router.post('/management/categories', { name: nextName }, {
-                preserveScroll: true,
-                onSuccess: () => {
-                    toast.success('Category created successfully.');
                     closeAddDialog();
                 },
                 onError: (errors) => toast.error(getFirstErrorMessage(errors)),
@@ -545,8 +508,17 @@ export default function Management({
         }
 
         const endpoint =
-            activeTab === 'unit' ? '/management/units' : '/management/storages';
-        const itemLabel = activeTab === 'unit' ? 'Unit' : 'Storage';
+            activeTab === 'category'
+                ? '/management/categories'
+                : activeTab === 'unit'
+                  ? '/management/units'
+                  : '/management/storages';
+        const itemLabel =
+            activeTab === 'category'
+                ? 'Category'
+                : activeTab === 'unit'
+                  ? 'Unit'
+                  : 'Storage';
 
         setIsSubmitting(true);
         router.post(endpoint, { name: nextName }, {
@@ -563,7 +535,7 @@ export default function Management({
     const handleEdit = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
-        if (isAccountTab) {
+        if (activeTab === 'account') {
             if (editAccountUserId === null) {
                 return;
             }
@@ -573,29 +545,6 @@ export default function Management({
                 preserveScroll: true,
                 onSuccess: () => {
                     toast.success('User updated successfully.');
-                    closeEditDialog();
-                },
-                onError: (errors) => toast.error(getFirstErrorMessage(errors)),
-                onFinish: () => setIsSubmitting(false),
-            });
-            return;
-        }
-
-        if (isCategoryTab) {
-            if (editCategoryId === null) {
-                return;
-            }
-
-            const nextName = editLocalValue.trim();
-            if (!nextName) {
-                return;
-            }
-
-            setIsSubmitting(true);
-            router.put(`/management/categories/${editCategoryId}`, { name: nextName }, {
-                preserveScroll: true,
-                onSuccess: () => {
-                    toast.success('Category updated successfully.');
                     closeEditDialog();
                 },
                 onError: (errors) => toast.error(getFirstErrorMessage(errors)),
@@ -614,10 +563,17 @@ export default function Management({
         }
 
         const endpoint =
-            editLocalTarget.tab === 'unit'
-                ? `/management/units/${editLocalTarget.id}`
-                : `/management/storages/${editLocalTarget.id}`;
-        const itemLabel = editLocalTarget.tab === 'unit' ? 'Unit' : 'Storage';
+            editLocalTarget.tab === 'category'
+                ? `/management/categories/${editLocalTarget.id}`
+                : editLocalTarget.tab === 'unit'
+                  ? `/management/units/${editLocalTarget.id}`
+                  : `/management/storages/${editLocalTarget.id}`;
+        const itemLabel =
+            editLocalTarget.tab === 'category'
+                ? 'Category'
+                : editLocalTarget.tab === 'unit'
+                  ? 'Unit'
+                  : 'Storage';
 
         setIsSubmitting(true);
         router.put(endpoint, { name: nextName }, {
@@ -659,7 +615,6 @@ export default function Management({
         }
 
         setIsDeleting(true);
-
         const endpoint =
             deleteDialogTarget.type === 'account'
                 ? `/management/users/${deleteDialogTarget.id}`
@@ -688,20 +643,19 @@ export default function Management({
         });
     };
 
-    const isAddDisabled = isAccountTab
-        ? !addAccountForm.name.trim() ||
-          !addAccountForm.email.trim() ||
-          !addAccountForm.role
-        : !addLocalValue.trim();
-
-    const isEditDisabled = isAccountTab
-        ? editAccountUserId === null ||
-          !editAccountForm.name.trim() ||
-          !editAccountForm.email.trim() ||
-          !editAccountForm.role
-        : isCategoryTab
-          ? editCategoryId === null || !editLocalValue.trim()
-          : !editLocalValue.trim() || !editLocalTarget;
+    const isAddDisabled =
+        activeTab === 'account'
+            ? !addAccountForm.name.trim() ||
+              !addAccountForm.email.trim() ||
+              !addAccountForm.role
+            : !addLocalValue.trim();
+    const isEditDisabled =
+        activeTab === 'account'
+            ? editAccountUserId === null ||
+              !editAccountForm.name.trim() ||
+              !editAccountForm.email.trim() ||
+              !editAccountForm.role
+            : !editLocalValue.trim() || !editLocalTarget;
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -757,179 +711,77 @@ export default function Management({
                         <p className="mt-2 text-sm text-muted-foreground">
                             {activeTabData.description}
                         </p>
-                        {isAccountTab ? (
-                            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <Input
-                                    value={accountSearch}
-                                    onChange={(event) => {
-                                        setAccountSearch(event.target.value);
-                                        setAccountPage(1);
-                                    }}
-                                    placeholder="Search name, email, or role..."
-                                    className="sm:max-w-sm"
-                                />
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <span>Show</span>
-                                    <select
-                                        value={accountPageSize}
-                                        onChange={(event) => {
-                                            setAccountPageSize(Number(event.target.value));
-                                            setAccountPage(1);
-                                        }}
-                                        className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
-                                    >
-                                        <option value={10}>10</option>
-                                        <option value={50}>50</option>
-                                        <option value={100}>100</option>
-                                    </select>
-                                    <span>entries</span>
-                                </div>
-                            </div>
-                        ) : isCategoryTab ? (
-                            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <Input
-                                    value={categorySearch}
-                                    onChange={(event) => {
-                                        setCategorySearch(event.target.value);
-                                        setCategoryPage(1);
-                                    }}
-                                    placeholder="Search category or added by..."
-                                    className="sm:max-w-sm"
-                                />
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <span>Show</span>
-                                    <select
-                                        value={categoryPageSize}
-                                        onChange={(event) => {
-                                            setCategoryPageSize(Number(event.target.value));
-                                            setCategoryPage(1);
-                                        }}
-                                        className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
-                                    >
-                                        <option value={10}>10</option>
-                                        <option value={50}>50</option>
-                                        <option value={100}>100</option>
-                                    </select>
-                                    <span>entries</span>
-                                </div>
-                            </div>
-                        ) : isUnitTab ? (
-                            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <Input
-                                    value={unitSearch}
-                                    onChange={(event) => {
-                                        setUnitSearch(event.target.value);
-                                        setUnitPage(1);
-                                    }}
-                                    placeholder="Search unit or added by..."
-                                    className="sm:max-w-sm"
-                                />
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <span>Show</span>
-                                    <select
-                                        value={unitPageSize}
-                                        onChange={(event) => {
-                                            setUnitPageSize(Number(event.target.value));
-                                            setUnitPage(1);
-                                        }}
-                                        className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
-                                    >
-                                        <option value={10}>10</option>
-                                        <option value={50}>50</option>
-                                        <option value={100}>100</option>
-                                    </select>
-                                    <span>entries</span>
-                                </div>
-                            </div>
-                        ) : isStorageTab ? (
-                            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <Input
-                                    value={storageSearch}
-                                    onChange={(event) => {
-                                        setStorageSearch(event.target.value);
-                                        setStoragePage(1);
-                                    }}
-                                    placeholder="Search storage or added by..."
-                                    className="sm:max-w-sm"
-                                />
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <span>Show</span>
-                                    <select
-                                        value={storagePageSize}
-                                        onChange={(event) => {
-                                            setStoragePageSize(Number(event.target.value));
-                                            setStoragePage(1);
-                                        }}
-                                        className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
-                                    >
-                                        <option value={10}>10</option>
-                                        <option value={50}>50</option>
-                                        <option value={100}>100</option>
-                                    </select>
-                                    <span>entries</span>
-                                </div>
-                            </div>
-                        ) : null}
 
+                        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <Input
+                                value={activeSearch}
+                                onChange={(event) => {
+                                    if (activeTab === 'account') {
+                                        setAccountSearch(event.target.value);
+                                        return;
+                                    }
+
+                                    if (activeTab === 'category') {
+                                        setCategorySearch(event.target.value);
+                                        return;
+                                    }
+
+                                    if (activeTab === 'unit') {
+                                        setUnitSearch(event.target.value);
+                                        return;
+                                    }
+
+                                    setStorageSearch(event.target.value);
+                                }}
+                                placeholder={activeTabData.searchPlaceholder}
+                                className="sm:max-w-sm"
+                            />
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <span>Show</span>
+                                <select
+                                    value={String(activePerPage)}
+                                    onChange={handleEntriesPerPageChange}
+                                    className="border-input bg-background ring-offset-background focus-visible:ring-ring inline-flex h-9 rounded-md border px-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden"
+                                >
+                                    {entriesPerPageOptions.map((option) => (
+                                        <option key={option} value={option}>
+                                            {option}
+                                        </option>
+                                    ))}
+                                </select>
+                                <span>entries</span>
+                            </div>
+                        </div>
                         <div className="mt-4 overflow-x-auto rounded-lg border border-border/70">
                             <table className="min-w-full text-sm">
-                                {isAccountTab ? (
+                                {activeTab === 'account' ? (
                                     <>
                                         <thead className="bg-muted/40 text-left">
                                             <tr>
-                                                <th className="px-4 py-3 font-medium">
-                                                    Name
-                                                </th>
-                                                <th className="px-4 py-3 font-medium">
-                                                    Email
-                                                </th>
-                                                <th className="px-4 py-3 font-medium">
-                                                    Role
-                                                </th>
-                                                <th className="px-4 py-3 text-right font-medium">
-                                                    Action
-                                                </th>
+                                                <th className="px-4 py-3 font-medium">Name</th>
+                                                <th className="px-4 py-3 font-medium">Email</th>
+                                                <th className="px-4 py-3 font-medium">Role</th>
+                                                <th className="px-4 py-3 text-right font-medium">Action</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {accountUsers.length === 0 ? (
+                                            {users.data.length === 0 ? (
                                                 <tr>
-                                                    <td
-                                                        colSpan={4}
-                                                        className="px-4 py-8 text-center text-muted-foreground"
-                                                    >
-                                                        No account entries found.
-                                                    </td>
-                                                </tr>
-                                            ) : filteredAccountUsers.length === 0 ? (
-                                                <tr>
-                                                    <td
-                                                        colSpan={4}
-                                                        className="px-4 py-8 text-center text-muted-foreground"
-                                                    >
-                                                        No matching accounts found.
+                                                    <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                                                        {filters.account_search
+                                                            ? 'No matching accounts found.'
+                                                            : 'No account entries found.'}
                                                     </td>
                                                 </tr>
                                             ) : (
-                                                paginatedAccountUsers.map((user) => (
-                                                    <tr
-                                                        key={user.id}
-                                                        className="border-t border-border/70"
-                                                    >
-                                                        <td className="px-4 py-3">
-                                                            {user.name}
-                                                        </td>
-                                                        <td className="px-4 py-3 text-muted-foreground">
-                                                            {user.email}
-                                                        </td>
+                                                users.data.map((user) => (
+                                                    <tr key={user.id} className="border-t border-border/70">
+                                                        <td className="px-4 py-3">{user.name}</td>
+                                                        <td className="px-4 py-3 text-muted-foreground">{user.email}</td>
                                                         <td className="px-4 py-3">
                                                             <Badge
                                                                 variant="outline"
-                                                                className={cn(
-                                                                    getRoleBadgeClassName(
-                                                                        user.role_slug,
-                                                                    ),
-                                                                )}
+                                                                className={cn(getRoleBadgeClassName(user.role_slug))}
                                                             >
                                                                 {user.role}
                                                             </Badge>
@@ -944,27 +796,17 @@ export default function Management({
                                                                             size="icon"
                                                                             className="size-8"
                                                                             aria-label={`Reset password for ${user.name}`}
-                                                                            onClick={() =>
-                                                                                handleResetPassword(
-                                                                                    user.id,
-                                                                                )
-                                                                            }
-                                                                            disabled={
-                                                                                resettingUserId !==
-                                                                                null
-                                                                            }
+                                                                            onClick={() => handleResetPassword(user.id)}
+                                                                            disabled={resettingUserId !== null}
                                                                         >
-                                                                            {resettingUserId ===
-                                                                            user.id ? (
+                                                                            {resettingUserId === user.id ? (
                                                                                 <Loader2 className="size-4 animate-spin" />
                                                                             ) : (
                                                                                 <RotateCcw className="size-4" />
                                                                             )}
                                                                         </Button>
                                                                     </TooltipTrigger>
-                                                                    <TooltipContent>
-                                                                        Reset password
-                                                                    </TooltipContent>
+                                                                    <TooltipContent>Reset password</TooltipContent>
                                                                 </Tooltip>
                                                                 <Tooltip>
                                                                     <TooltipTrigger asChild>
@@ -974,18 +816,12 @@ export default function Management({
                                                                             size="icon"
                                                                             className="size-8"
                                                                             aria-label={`Edit ${user.name}`}
-                                                                            onClick={() =>
-                                                                                openEditAccountDialog(
-                                                                                    user,
-                                                                                )
-                                                                            }
+                                                                            onClick={() => openEditAccountDialog(user)}
                                                                         >
                                                                             <Pencil className="size-4" />
                                                                         </Button>
                                                                     </TooltipTrigger>
-                                                                    <TooltipContent>
-                                                                        Edit
-                                                                    </TooltipContent>
+                                                                    <TooltipContent>Edit</TooltipContent>
                                                                 </Tooltip>
                                                                 <Tooltip>
                                                                     <TooltipTrigger asChild>
@@ -1006,108 +842,7 @@ export default function Management({
                                                                             <Trash2 className="size-4" />
                                                                         </Button>
                                                                     </TooltipTrigger>
-                                                                    <TooltipContent>
-                                                                        Delete
-                                                                    </TooltipContent>
-                                                                </Tooltip>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                ))
-                                            )}
-                                        </tbody>
-                                    </>
-                                ) : isCategoryTab ? (
-                                    <>
-                                        <thead className="bg-muted/40 text-left">
-                                            <tr>
-                                                <th className="px-4 py-3 font-medium">
-                                                    Category
-                                                </th>
-                                                <th className="px-4 py-3 font-medium">
-                                                    Added by
-                                                </th>
-                                                <th className="px-4 py-3 text-right font-medium">
-                                                    Action
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {categoryItems.length === 0 ? (
-                                                <tr>
-                                                    <td
-                                                        colSpan={3}
-                                                        className="px-4 py-8 text-center text-muted-foreground"
-                                                    >
-                                                        No category entries found.
-                                                    </td>
-                                                </tr>
-                                            ) : filteredCategoryItems.length === 0 ? (
-                                                <tr>
-                                                    <td
-                                                        colSpan={3}
-                                                        className="px-4 py-8 text-center text-muted-foreground"
-                                                    >
-                                                        No matching categories found.
-                                                    </td>
-                                                </tr>
-                                            ) : (
-                                                paginatedCategoryItems.map((item) => (
-                                                    <tr
-                                                        key={item.id}
-                                                        className="border-t border-border/70"
-                                                    >
-                                                        <td className="px-4 py-3">
-                                                            {item.name}
-                                                        </td>
-                                                        <td className="px-4 py-3 text-muted-foreground">
-                                                            {item.created_by_name ?? 'System'}
-                                                        </td>
-                                                        <td className="px-4 py-3">
-                                                            <div className="flex items-center justify-end gap-2">
-                                                                <Tooltip>
-                                                                    <TooltipTrigger asChild>
-                                                                        <Button
-                                                                            type="button"
-                                                                            variant="ghost"
-                                                                            size="icon"
-                                                                            className="size-8"
-                                                                            aria-label={`Edit ${item.name}`}
-                                                                            onClick={() =>
-                                                                                openEditCategoryDialog(
-                                                                                    item,
-                                                                                )
-                                                                            }
-                                                                        >
-                                                                            <Pencil className="size-4" />
-                                                                        </Button>
-                                                                    </TooltipTrigger>
-                                                                    <TooltipContent>
-                                                                        Edit
-                                                                    </TooltipContent>
-                                                                </Tooltip>
-                                                                <Tooltip>
-                                                                    <TooltipTrigger asChild>
-                                                                        <Button
-                                                                            type="button"
-                                                                            variant="ghost"
-                                                                            size="icon"
-                                                                            className="size-8 text-destructive hover:text-destructive"
-                                                                            aria-label={`Delete ${item.name}`}
-                                                                            onClick={() =>
-                                                                                openDeleteDialog({
-                                                                                    type: 'category',
-                                                                                    id: item.id,
-                                                                                    name: item.name,
-                                                                                })
-                                                                            }
-                                                                        >
-                                                                            <Trash2 className="size-4" />
-                                                                        </Button>
-                                                                    </TooltipTrigger>
-                                                                    <TooltipContent>
-                                                                        Delete
-                                                                    </TooltipContent>
+                                                                    <TooltipContent>Delete</TooltipContent>
                                                                 </Tooltip>
                                                             </div>
                                                         </td>
@@ -1123,42 +858,23 @@ export default function Management({
                                                 <th className="px-4 py-3 font-medium">
                                                     {activeTabData.label}
                                                 </th>
-                                                <th className="px-4 py-3 font-medium">
-                                                    Added by
-                                                </th>
-                                                <th className="px-4 py-3 text-right font-medium">
-                                                    Action
-                                                </th>
+                                                <th className="px-4 py-3 font-medium">Added by</th>
+                                                <th className="px-4 py-3 text-right font-medium">Action</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {totalActiveLocalItems === 0 ? (
+                                            {activeLocalRecords.data.length === 0 ? (
                                                 <tr>
-                                                    <td
-                                                        colSpan={3}
-                                                        className="px-4 py-8 text-center text-muted-foreground"
-                                                    >
-                                                        No {activeTabData.label.toLowerCase()} entries found.
-                                                    </td>
-                                                </tr>
-                                            ) : filteredActiveLocalItems.length === 0 ? (
-                                                <tr>
-                                                    <td
-                                                        colSpan={3}
-                                                        className="px-4 py-8 text-center text-muted-foreground"
-                                                    >
-                                                        No matching {activeTabData.label.toLowerCase()} found.
+                                                    <td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">
+                                                        {activeSearch.trim()
+                                                            ? `No matching ${activeTabData.label.toLowerCase()} found.`
+                                                            : `No ${activeTabData.label.toLowerCase()} entries found.`}
                                                     </td>
                                                 </tr>
                                             ) : (
-                                                activeLocalItems.map((item) => (
-                                                    <tr
-                                                        key={item.id}
-                                                        className="border-t border-border/70"
-                                                    >
-                                                        <td className="px-4 py-3">
-                                                            {item.name}
-                                                        </td>
+                                                activeLocalRecords.data.map((item) => (
+                                                    <tr key={item.id} className="border-t border-border/70">
+                                                        <td className="px-4 py-3">{item.name}</td>
                                                         <td className="px-4 py-3 text-muted-foreground">
                                                             {item.created_by_name ?? 'System'}
                                                         </td>
@@ -1175,15 +891,14 @@ export default function Management({
                                                                             onClick={() =>
                                                                                 openEditLocalDialog(
                                                                                     item,
+                                                                                    activeTab as Exclude<ManagementTab, 'account'>,
                                                                                 )
                                                                             }
                                                                         >
                                                                             <Pencil className="size-4" />
                                                                         </Button>
                                                                     </TooltipTrigger>
-                                                                    <TooltipContent>
-                                                                        Edit
-                                                                    </TooltipContent>
+                                                                    <TooltipContent>Edit</TooltipContent>
                                                                 </Tooltip>
                                                                 <Tooltip>
                                                                     <TooltipTrigger asChild>
@@ -1204,9 +919,7 @@ export default function Management({
                                                                             <Trash2 className="size-4" />
                                                                         </Button>
                                                                     </TooltipTrigger>
-                                                                    <TooltipContent>
-                                                                        Delete
-                                                                    </TooltipContent>
+                                                                    <TooltipContent>Delete</TooltipContent>
                                                                 </Tooltip>
                                                             </div>
                                                         </td>
@@ -1218,145 +931,37 @@ export default function Management({
                                 )}
                             </table>
                         </div>
-                        {isAccountTab && accountUsers.length > 0 ? (
-                            <div className="mt-3 flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                                <p>
-                                    Showing {accountEntryStart} to {accountEntryEnd} of{' '}
-                                    {filteredAccountUsers.length} entries
-                                </p>
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() =>
-                                            setAccountPage((currentPage) =>
-                                                Math.max(currentPage - 1, 1),
-                                            )
-                                        }
-                                        disabled={accountPage <= 1}
-                                    >
-                                        Previous
-                                    </Button>
-                                    <span className="min-w-24 text-center">
-                                        Page {accountPage} of {totalAccountPages}
-                                    </span>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() =>
-                                            setAccountPage((currentPage) =>
-                                                Math.min(
-                                                    currentPage + 1,
-                                                    totalAccountPages,
-                                                ),
-                                            )
-                                        }
-                                        disabled={accountPage >= totalAccountPages}
-                                    >
-                                        Next
-                                    </Button>
-                                </div>
-                            </div>
-                        ) : isCategoryTab && categoryItems.length > 0 ? (
-                            <div className="mt-3 flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                                <p>
-                                    Showing {categoryEntryStart} to {categoryEntryEnd} of{' '}
-                                    {filteredCategoryItems.length} entries
-                                </p>
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() =>
-                                            setCategoryPage((currentPage) =>
-                                                Math.max(currentPage - 1, 1),
-                                            )
-                                        }
-                                        disabled={categoryPage <= 1}
-                                    >
-                                        Previous
-                                    </Button>
-                                    <span className="min-w-24 text-center">
-                                        Page {categoryPage} of {totalCategoryPages}
-                                    </span>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() =>
-                                            setCategoryPage((currentPage) =>
-                                                Math.min(
-                                                    currentPage + 1,
-                                                    totalCategoryPages,
-                                                ),
-                                            )
-                                        }
-                                        disabled={categoryPage >= totalCategoryPages}
-                                    >
-                                        Next
-                                    </Button>
-                                </div>
-                            </div>
-                        ) : (isUnitTab || isStorageTab) && totalActiveLocalItems > 0 ? (
-                            <div className="mt-3 flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                                <p>
-                                    Showing {activeLocalEntryStart} to {activeLocalEntryEnd} of{' '}
-                                    {filteredActiveLocalItems.length} entries
-                                </p>
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() => {
-                                            if (isUnitTab) {
-                                                setUnitPage((currentPage) =>
-                                                    Math.max(currentPage - 1, 1),
-                                                );
-                                                return;
-                                            }
 
-                                            setStoragePage((currentPage) =>
-                                                Math.max(currentPage - 1, 1),
-                                            );
-                                        }}
-                                        disabled={activeLocalPage <= 1}
-                                    >
-                                        Previous
-                                    </Button>
-                                    <span className="min-w-24 text-center">
-                                        Page {activeLocalPage} of {activeLocalTotalPages}
-                                    </span>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() => {
-                                            if (isUnitTab) {
-                                                setUnitPage((currentPage) =>
-                                                    Math.min(
-                                                        currentPage + 1,
-                                                        activeLocalTotalPages,
-                                                    ),
-                                                );
-                                                return;
-                                            }
-
-                                            setStoragePage((currentPage) =>
-                                                Math.min(
-                                                    currentPage + 1,
-                                                    activeLocalTotalPages,
-                                                ),
-                                            );
-                                        }}
-                                        disabled={activeLocalPage >= activeLocalTotalPages}
-                                    >
-                                        Next
-                                    </Button>
-                                </div>
+                        <div className="mt-3 flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                            <p>
+                                Showing {activeRecords.from ?? 0} to {activeRecords.to ?? 0} of{' '}
+                                {activeRecords.total} entries
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => goToPage(activeRecords.current_page - 1)}
+                                    disabled={activeRecords.current_page <= 1}
+                                >
+                                    Previous
+                                </Button>
+                                <span className="min-w-24 text-center">
+                                    Page {activeRecords.current_page} of {activeRecords.last_page}
+                                </span>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => goToPage(activeRecords.current_page + 1)}
+                                    disabled={activeRecords.current_page >= activeRecords.last_page}
+                                >
+                                    Next
+                                </Button>
                             </div>
-                        ) : null}
+                        </div>
                     </div>
                 </CardContent>
             </Card>
-
             <Dialog
                 open={isAddDialogOpen}
                 onOpenChange={(open) => (open ? setIsAddDialogOpen(true) : closeAddDialog())}
@@ -1365,13 +970,13 @@ export default function Management({
                     <DialogHeader>
                         <DialogTitle>Add {activeTabData.label}</DialogTitle>
                         <DialogDescription>
-                            {isAccountTab
+                            {activeTab === 'account'
                                 ? 'Create a new account. Default password will be set to apoy1234.'
                                 : `Create a new ${activeTabData.label.toLowerCase()} entry.`}
                         </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleAdd} className="space-y-4">
-                        {isAccountTab ? (
+                        {activeTab === 'account' ? (
                             <>
                                 <div className="space-y-2">
                                     <Label htmlFor="account-add-name">Name</Label>
@@ -1431,19 +1036,13 @@ export default function Management({
                                 <Input
                                     id="management-add-name"
                                     value={addLocalValue}
-                                    onChange={(event) =>
-                                        setAddLocalValue(event.target.value)
-                                    }
+                                    onChange={(event) => setAddLocalValue(event.target.value)}
                                     placeholder={`Enter ${activeTabData.label.toLowerCase()}...`}
                                 />
                             </div>
                         )}
                         <DialogFooter>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={closeAddDialog}
-                            >
+                            <Button type="button" variant="outline" onClick={closeAddDialog}>
                                 Cancel
                             </Button>
                             <Button type="submit" disabled={isSubmitting || isAddDisabled}>
@@ -1469,13 +1068,13 @@ export default function Management({
                     <DialogHeader>
                         <DialogTitle>Edit {activeTabData.label}</DialogTitle>
                         <DialogDescription>
-                            {isAccountTab
+                            {activeTab === 'account'
                                 ? 'Update this account record.'
                                 : `Update this ${activeTabData.label.toLowerCase()} entry.`}
                         </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleEdit} className="space-y-4">
-                        {isAccountTab ? (
+                        {activeTab === 'account' ? (
                             <>
                                 <div className="space-y-2">
                                     <Label htmlFor="account-edit-name">Name</Label>
@@ -1535,19 +1134,13 @@ export default function Management({
                                 <Input
                                     id="management-edit-name"
                                     value={editLocalValue}
-                                    onChange={(event) =>
-                                        setEditLocalValue(event.target.value)
-                                    }
+                                    onChange={(event) => setEditLocalValue(event.target.value)}
                                     placeholder={`Enter ${activeTabData.label.toLowerCase()}...`}
                                 />
                             </div>
                         )}
                         <DialogFooter>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={closeEditDialog}
-                            >
+                            <Button type="button" variant="outline" onClick={closeEditDialog}>
                                 Cancel
                             </Button>
                             <Button type="submit" disabled={isSubmitting || isEditDisabled}>

@@ -25,8 +25,19 @@ class InventoryController extends Controller
     /**
      * Show the inventory page.
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
+        $validated = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'sort' => ['nullable', 'string', Rule::in(['name', 'code', 'category', 'quantity', 'unit', 'storage', 'status'])],
+            'direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
+            'per_page' => ['nullable', 'integer', Rule::in(['10', '50', '100'])],
+        ]);
+        $search = trim((string) ($validated['search'] ?? ''));
+        $sort = $validated['sort'] ?? null;
+        $direction = $validated['direction'] ?? 'asc';
+        $perPage = (int) ($validated['per_page'] ?? 10);
+
         $categories = Category::query()
             ->orderBy('name')
             ->get(['id', 'name'])
@@ -54,47 +65,84 @@ class InventoryController extends Controller
             ])
             ->values();
 
+        $sortColumn = match ($sort) {
+            'name' => 'ingredients.name',
+            'code' => 'ingredients.code',
+            'category' => 'categories.name',
+            'quantity' => 'ingredients.quantity',
+            'unit' => 'units.name',
+            'storage' => 'storages.name',
+            'status' => 'ingredients.status',
+            default => null,
+        };
+
         $ingredients = Ingredient::query()
-            ->with([
-                'category:id,name',
-                'unit:id,name',
-                'storage:id,name',
-                'creator:id,name',
-            ])
+            ->leftJoin('categories', 'ingredients.category_id', '=', 'categories.id')
+            ->leftJoin('units', 'ingredients.unit_id', '=', 'units.id')
+            ->leftJoin('storages', 'ingredients.storage_id', '=', 'storages.id')
+            ->leftJoin('users as creators', 'ingredients.created_by', '=', 'creators.id')
             ->select([
-                'id',
-                'name',
-                'code',
-                'category_id',
-                'quantity',
-                'unit_id',
-                'storage_id',
-                'status',
-                'created_by',
+                'ingredients.id',
+                'ingredients.name',
+                'ingredients.code',
+                'ingredients.category_id',
+                'ingredients.quantity',
+                'ingredients.unit_id',
+                'ingredients.storage_id',
+                'ingredients.status',
+                'ingredients.created_by',
             ])
-            ->orderByDesc('id')
-            ->get()
-            ->map(fn (Ingredient $ingredient) => [
+            ->selectRaw('categories.name as category_name')
+            ->selectRaw('units.name as unit_name')
+            ->selectRaw('storages.name as storage_name')
+            ->selectRaw('creators.name as created_by_name')
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($innerQuery) use ($search) {
+                    $innerQuery
+                        ->where('ingredients.name', 'like', "%{$search}%")
+                        ->orWhere('ingredients.code', 'like', "%{$search}%")
+                        ->orWhere('categories.name', 'like', "%{$search}%")
+                        ->orWhere('units.name', 'like', "%{$search}%")
+                        ->orWhere('storages.name', 'like', "%{$search}%")
+                        ->orWhere('ingredients.status', 'like', "%{$search}%")
+                        ->orWhereRaw('CAST(ingredients.quantity AS CHAR) like ?', ["%{$search}%"]);
+                });
+            })
+            ->when(
+                $sortColumn !== null,
+                fn ($query) => $query
+                    ->orderBy($sortColumn, $direction)
+                    ->orderBy('ingredients.id'),
+                fn ($query) => $query->orderByDesc('ingredients.id'),
+            )
+            ->paginate($perPage)
+            ->withQueryString()
+            ->through(fn (Ingredient $ingredient) => [
                 'id' => $ingredient->id,
                 'name' => $ingredient->name,
                 'code' => $ingredient->code,
                 'category_id' => $ingredient->category_id,
-                'category' => $ingredient->category?->name ?? '',
-                'quantity' => $ingredient->quantity,
+                'category' => (string) ($ingredient->category_name ?? ''),
+                'quantity' => (int) $ingredient->quantity,
                 'unit_id' => $ingredient->unit_id,
-                'unit' => $ingredient->unit?->name ?? '',
+                'unit' => (string) ($ingredient->unit_name ?? ''),
                 'storage_id' => $ingredient->storage_id,
-                'storage' => $ingredient->storage?->name ?? '',
+                'storage' => (string) ($ingredient->storage_name ?? ''),
                 'status' => $ingredient->status,
-                'created_by_name' => $ingredient->creator?->name,
-            ])
-            ->values();
+                'created_by_name' => $ingredient->created_by_name,
+            ]);
 
         return Inertia::render('inventory', [
             'categories' => $categories,
             'units' => $units,
             'storages' => $storages,
             'ingredients' => $ingredients,
+            'filters' => [
+                'search' => $search,
+                'sort' => $sort,
+                'direction' => $direction,
+                'per_page' => $perPage,
+            ],
         ]);
     }
 
@@ -227,7 +275,7 @@ class InventoryController extends Controller
             ],
         ]);
 
-        return to_route('inventory');
+        return redirect()->back();
     }
 
     /**
@@ -324,7 +372,7 @@ class InventoryController extends Controller
             ]);
         }
 
-        return to_route('inventory');
+        return redirect()->back();
     }
 
     /**
@@ -380,7 +428,7 @@ class InventoryController extends Controller
 
         $ingredient->delete();
 
-        return to_route('inventory');
+        return redirect()->back();
     }
 
     /**

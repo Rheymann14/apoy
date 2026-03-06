@@ -6,11 +6,20 @@ use App\Models\Category;
 use App\Models\Ingredient;
 use App\Models\Storage;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class DashboardController extends Controller
 {
+    /**
+     * Allowed inventory status values.
+     *
+     * @var list<string>
+     */
+    private const STATUSES = ['In Stock', 'Low Stock', 'Out of Stock'];
+
     /**
      * Show the dashboard page.
      */
@@ -75,7 +84,25 @@ class DashboardController extends Controller
             ])
             ->values();
 
-        $inventoryItems = Ingredient::query()
+        return Inertia::render('dashboard', [
+            'counts' => $counts,
+            'statusChart' => $statusChart,
+            'dailyAdded' => $dailyAdded,
+            'categoryChart' => $categoryChart,
+            'recentIngredients' => $recentIngredients,
+        ]);
+    }
+
+    /**
+     * Return report rows for a single inventory status.
+     */
+    public function statusReport(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'status' => ['required', 'string', 'in:'.implode(',', self::STATUSES)],
+        ]);
+
+        $items = Ingredient::query()
             ->with(['category:id,name', 'unit:id,name', 'storage:id,name'])
             ->select([
                 'id',
@@ -87,8 +114,9 @@ class DashboardController extends Controller
                 'unit_id',
                 'storage_id',
             ])
+            ->where('status', $validated['status'])
             ->orderBy('name')
-            ->orderBy('id')
+            ->orderBy('code')
             ->get()
             ->map(fn (Ingredient $ingredient) => [
                 'id' => $ingredient->id,
@@ -102,13 +130,8 @@ class DashboardController extends Controller
             ])
             ->values();
 
-        return Inertia::render('dashboard', [
-            'counts' => $counts,
-            'statusChart' => $statusChart,
-            'dailyAdded' => $dailyAdded,
-            'categoryChart' => $categoryChart,
-            'recentIngredients' => $recentIngredients,
-            'inventoryItems' => $inventoryItems,
+        return response()->json([
+            'items' => $items,
         ]);
     }
 
