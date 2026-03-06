@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\FallbackController;
 use App\Http\Controllers\ManagementController;
 use App\Http\Controllers\InventoryController;
 use Illuminate\Support\Facades\Route;
@@ -52,4 +53,4 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
 require __DIR__.'/settings.php';
 
-Route::fallback(fn () => response()->view('errors.404', [], 404));
+Route::fallback(FallbackController::class);

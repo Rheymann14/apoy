@@ -9,6 +9,7 @@ use App\Models\Storage;
 use App\Models\Unit;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -37,6 +38,7 @@ class InventoryController extends Controller
         $sort = $validated['sort'] ?? null;
         $direction = $validated['direction'] ?? 'asc';
         $perPage = (int) ($validated['per_page'] ?? 10);
+        $numericSearch = $search !== '' && ctype_digit($search);
 
         $categories = Category::query()
             ->orderBy('name')
@@ -96,16 +98,19 @@ class InventoryController extends Controller
             ->selectRaw('units.name as unit_name')
             ->selectRaw('storages.name as storage_name')
             ->selectRaw('creators.name as created_by_name')
-            ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($innerQuery) use ($search) {
+            ->when($search !== '', function ($query) use ($search, $numericSearch) {
+                $query->where(function ($innerQuery) use ($search, $numericSearch) {
                     $innerQuery
                         ->where('ingredients.name', 'like', "%{$search}%")
                         ->orWhere('ingredients.code', 'like', "%{$search}%")
                         ->orWhere('categories.name', 'like', "%{$search}%")
                         ->orWhere('units.name', 'like', "%{$search}%")
                         ->orWhere('storages.name', 'like', "%{$search}%")
-                        ->orWhere('ingredients.status', 'like', "%{$search}%")
-                        ->orWhereRaw('CAST(ingredients.quantity AS CHAR) like ?', ["%{$search}%"]);
+                        ->orWhere('ingredients.status', 'like', "%{$search}%");
+
+                    if ($numericSearch) {
+                        $innerQuery->orWhere('ingredients.quantity', (int) $search);
+                    }
                 });
             })
             ->when(
@@ -162,6 +167,8 @@ class InventoryController extends Controller
         $dateFrom = $validated['date_from'] ?? null;
         $dateTo = $validated['date_to'] ?? null;
         $perPage = (int) ($validated['per_page'] ?? 10);
+        $dateRangeStart = $dateFrom ? Carbon::parse($dateFrom)->startOfDay() : null;
+        $dateRangeEnd = $dateTo ? Carbon::parse($dateTo)->endOfDay() : null;
 
         $changesQuery = IngredientChange::query()
             ->with([
@@ -169,9 +176,10 @@ class InventoryController extends Controller
                 'editor:id,name',
             ])
             ->when($search !== '', fn ($query) => $query->where('ingredient_code', 'like', "%{$search}%"))
-            ->when($dateFrom, fn ($query, $value) => $query->whereDate('created_at', '>=', $value))
-            ->when($dateTo, fn ($query, $value) => $query->whereDate('created_at', '<=', $value))
-            ->latest('created_at');
+            ->when($dateRangeStart, fn ($query, $value) => $query->where('created_at', '>=', $value))
+            ->when($dateRangeEnd, fn ($query, $value) => $query->where('created_at', '<=', $value))
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
 
         $changes = $changesQuery
             ->paginate($perPage)

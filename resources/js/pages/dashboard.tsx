@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEventHandler } from 'react';
+import { toast } from 'sonner';
 import Sortable from 'sortablejs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -101,7 +102,7 @@ const dashboardRealtimeKeys = [
     'categoryChart',
     'recentIngredients',
 ] as const;
-const dashboardRefreshIntervalMs = 5000;
+const dashboardRefreshIntervalMs = 30000;
 
 type TopCardId =
     | 'total_ingredients'
@@ -264,6 +265,22 @@ const toggleDraggingCardHighlight = (
 };
 
 const formatCount = (value: number) => new Intl.NumberFormat().format(value);
+
+const renderPreviewMessage = (
+    previewWindow: Window,
+    title: string,
+    message: string,
+) => {
+    previewWindow.document.title = title;
+    previewWindow.document.body.innerHTML = '';
+
+    const paragraph = previewWindow.document.createElement('p');
+    paragraph.style.fontFamily = 'Arial, sans-serif';
+    paragraph.style.padding = '16px';
+    paragraph.textContent = message;
+
+    previewWindow.document.body.appendChild(paragraph);
+};
 
 const toPercentLabel = (value: number, total: number) => {
     if (total <= 0) {
@@ -855,7 +872,11 @@ export default function Dashboard({
         let isReloading = false;
 
         const reloadDashboardData = () => {
-            if (document.visibilityState === 'hidden' || isReloading) {
+            if (
+                document.visibilityState === 'hidden' ||
+                isReloading ||
+                !window.navigator.onLine
+            ) {
                 return;
             }
 
@@ -1058,9 +1079,11 @@ export default function Dashboard({
             return;
         }
 
-        previewWindow.document.title = 'Generating PDF...';
-        previewWindow.document.body.innerHTML =
-            '<p style="font-family: Arial, sans-serif; padding: 16px;">Generating report...</p>';
+        renderPreviewMessage(
+            previewWindow,
+            'Generating PDF...',
+            'Generating report...',
+        );
 
         try {
             const response = await window.fetch(
@@ -1074,7 +1097,14 @@ export default function Dashboard({
             );
 
             if (!response.ok) {
-                throw new Error(`Failed to load report data (${response.status})`);
+                const payload = (await response.json().catch(() => null)) as
+                    | { message?: string }
+                    | null;
+
+                throw new Error(
+                    payload?.message ??
+                        `Failed to load report data (${response.status})`,
+                );
             }
 
             const { items } = (await response.json()) as {
@@ -1102,10 +1132,18 @@ export default function Dashboard({
             window.setTimeout(() => {
                 URL.revokeObjectURL(url);
             }, 60_000);
-        } catch {
-            previewWindow.document.title = 'Unable to generate report';
-            previewWindow.document.body.innerHTML =
-                '<p style="font-family: Arial, sans-serif; padding: 16px;">Unable to generate the report right now. Please try again.</p>';
+        } catch (error) {
+            const message =
+                error instanceof Error
+                    ? error.message
+                    : 'Unable to generate the report right now. Please try again.';
+
+            toast.error(message);
+            renderPreviewMessage(
+                previewWindow,
+                'Unable to generate report',
+                message,
+            );
         }
     };
 

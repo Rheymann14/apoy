@@ -21,10 +21,20 @@ class DashboardController extends Controller
     private const STATUSES = ['In Stock', 'Low Stock', 'Out of Stock'];
 
     /**
+     * Maximum number of rows allowed in a printable status report.
+     */
+    private const STATUS_REPORT_LIMIT = 500;
+
+    /**
      * Show the dashboard page.
      */
     public function index(): Response
     {
+        $ingredientSummary = Ingredient::query()
+            ->selectRaw('COUNT(*) as total_ingredients')
+            ->selectRaw('COALESCE(SUM(quantity), 0) as total_quantity')
+            ->first();
+
         $statusCounts = Ingredient::query()
             ->selectRaw('status, COUNT(*) as total')
             ->groupBy('status')
@@ -40,8 +50,8 @@ class DashboardController extends Controller
         ])->values();
 
         $counts = [
-            'total_ingredients' => Ingredient::query()->count(),
-            'total_quantity' => (int) Ingredient::query()->sum('quantity'),
+            'total_ingredients' => (int) ($ingredientSummary?->total_ingredients ?? 0),
+            'total_quantity' => (int) ($ingredientSummary?->total_quantity ?? 0),
             'total_categories' => Category::query()->count(),
             'total_storages' => Storage::query()->count(),
             'total_users' => User::query()->count(),
@@ -102,36 +112,55 @@ class DashboardController extends Controller
             'status' => ['required', 'string', 'in:'.implode(',', self::STATUSES)],
         ]);
 
-        $items = Ingredient::query()
-            ->with(['category:id,name', 'unit:id,name', 'storage:id,name'])
+        $itemsQuery = Ingredient::query()
+            ->leftJoin('categories', 'ingredients.category_id', '=', 'categories.id')
+            ->leftJoin('units', 'ingredients.unit_id', '=', 'units.id')
+            ->leftJoin('storages', 'ingredients.storage_id', '=', 'storages.id')
+            ->where('ingredients.status', $validated['status']);
+
+        $totalItems = (clone $itemsQuery)->count('ingredients.id');
+
+        if ($totalItems > self::STATUS_REPORT_LIMIT) {
+            return response()->json([
+                'message' => sprintf(
+                    'This report includes %d items. Please narrow the status list to %d items or fewer before exporting.',
+                    $totalItems,
+                    self::STATUS_REPORT_LIMIT,
+                ),
+                'limit' => self::STATUS_REPORT_LIMIT,
+                'total' => $totalItems,
+            ], 422);
+        }
+
+        $items = $itemsQuery
             ->select([
-                'id',
-                'name',
-                'code',
-                'quantity',
-                'status',
-                'category_id',
-                'unit_id',
-                'storage_id',
+                'ingredients.id',
+                'ingredients.name',
+                'ingredients.code',
+                'ingredients.quantity',
+                'ingredients.status',
             ])
-            ->where('status', $validated['status'])
-            ->orderBy('name')
-            ->orderBy('code')
+            ->selectRaw('categories.name as category_name')
+            ->selectRaw('units.name as unit_name')
+            ->selectRaw('storages.name as storage_name')
+            ->orderBy('ingredients.name')
+            ->orderBy('ingredients.code')
             ->get()
-            ->map(fn (Ingredient $ingredient) => [
-                'id' => $ingredient->id,
+            ->map(fn (object $ingredient) => [
+                'id' => (int) $ingredient->id,
                 'name' => $ingredient->name,
                 'code' => $ingredient->code,
-                'category' => $ingredient->category?->name ?? 'Uncategorized',
+                'category' => $ingredient->category_name ?? 'Uncategorized',
                 'quantity' => (int) $ingredient->quantity,
-                'unit' => $ingredient->unit?->name ?? 'N/A',
-                'storage' => $ingredient->storage?->name ?? 'Unassigned',
+                'unit' => $ingredient->unit_name ?? 'N/A',
+                'storage' => $ingredient->storage_name ?? 'Unassigned',
                 'status' => $ingredient->status,
             ])
             ->values();
 
         return response()->json([
             'items' => $items,
+            'total' => $totalItems,
         ]);
     }
 
