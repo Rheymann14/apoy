@@ -774,6 +774,12 @@ function StatusDonutChart({
                                     {formatCount(item.value)}
                                 </span>
                                 <Button
+                                    id={`print-status-${item.label
+                                        .toLowerCase()
+                                        .replaceAll(' ', '-')}`}
+                                    name={`print-status-${item.label
+                                        .toLowerCase()
+                                        .replaceAll(' ', '-')}`}
                                     type="button"
                                     variant="outline"
                                     size="sm"
