@@ -1,4 +1,4 @@
-import { Link } from '@inertiajs/react';
+import { Link, usePage } from '@inertiajs/react';
 import { LayoutGrid, Package, Settings } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavFooter } from '@/components/nav-footer';
@@ -29,15 +29,19 @@ const mainNavItems: NavItem[] = [
     },
 ];
 
-const footerNavItems: NavItem[] = [
-    {
-        title: 'Management',
-        href: '/management',
-        icon: Settings,
-    },
-];
-
 export function AppSidebar() {
+    const { auth } = usePage().props;
+    const isAdmin = auth.user.role_slug === 'admin';
+    const footerNavItems: NavItem[] = isAdmin
+        ? [
+              {
+                  title: 'Management',
+                  href: '/management',
+                  icon: Settings,
+              },
+          ]
+        : [];
+
     return (
         <Sidebar collapsible="icon" variant="inset">
             <SidebarHeader>
@@ -57,7 +61,9 @@ export function AppSidebar() {
             </SidebarContent>
 
             <SidebarFooter>
-                <NavFooter items={footerNavItems} className="mt-auto" />
+                {footerNavItems.length > 0 ? (
+                    <NavFooter items={footerNavItems} className="mt-auto" />
+                ) : null}
                 <NavUser />
             </SidebarFooter>
         </Sidebar>

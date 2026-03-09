@@ -93,4 +93,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(Ingredient::class, 'created_by');
     }
+
+    /**
+     * Determine whether the user has the admin role.
+     */
+    public function isAdmin(): bool
+    {
+        $this->loadMissing('role:id,slug');
+
+        return $this->role?->slug === 'admin';
+    }
 }

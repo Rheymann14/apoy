@@ -72,6 +72,9 @@ export function AppHeader({ breadcrumbs = [] }: Props) {
     const { auth } = page.props;
     const getInitials = useInitials();
     const { whenCurrentUrl } = useCurrentUrl();
+    const isAdmin = auth.user.role_slug === 'admin';
+    const visibleRightNavItems = isAdmin ? rightNavItems : [];
+
     return (
         <>
             <div className="sticky top-0 z-40 border-b border-sidebar-border/70 bg-background/80 backdrop-blur-xl">
@@ -122,7 +125,7 @@ export function AppHeader({ breadcrumbs = [] }: Props) {
                                         </div>
 
                                         <div className="flex flex-col space-y-4">
-                                            {rightNavItems.map((item) => (
+                                            {visibleRightNavItems.map((item) => (
                                                 <Link
                                                     key={item.title}
                                                     href={item.href}
@@ -183,7 +186,7 @@ export function AppHeader({ breadcrumbs = [] }: Props) {
 
                     <div className="ml-auto flex items-center space-x-2">
                         <div className="hidden gap-1 lg:flex">
-                            {rightNavItems.map((item) => (
+                            {visibleRightNavItems.map((item) => (
                                 <TooltipProvider
                                     key={item.title}
                                     delayDuration={0}
@@ -218,7 +221,7 @@ export function AppHeader({ breadcrumbs = [] }: Props) {
                                 >
                                     <Avatar className="size-8 overflow-hidden rounded-full">
                                         <AvatarImage
-                                            src={auth.user.avatar}
+                                            src={auth.user.avatar ?? undefined}
                                             alt={auth.user.name}
                                         />
                                         <AvatarFallback className="rounded-lg bg-neutral-200 text-black dark:bg-neutral-700 dark:text-white">

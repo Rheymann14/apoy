@@ -1,4 +1,4 @@
-import { Head, Link, router } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import {
     Check,
     ChevronDown,
@@ -354,6 +354,8 @@ export default function Inventory({
     ingredients,
     filters,
 }: InventoryPageProps) {
+    const { auth } = usePage().props;
+    const isAdmin = auth.user.role_slug === 'admin';
     const [search, setSearch] = useState(filters.search ?? '');
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [addForm, setAddForm] = useState<IngredientForm>(defaultForm);
@@ -580,6 +582,10 @@ export default function Inventory({
     };
 
     const openDeleteDialog = (item: InventoryItem) => {
+        if (!isAdmin) {
+            return;
+        }
+
         setDeleteTarget({ id: item.id, name: item.name });
         setIsDeleteDialogOpen(true);
     };
@@ -590,7 +596,7 @@ export default function Inventory({
     };
 
     const handleDeleteIngredient = () => {
-        if (!deleteTarget) {
+        if (!isAdmin || !deleteTarget) {
             return;
         }
 
@@ -1140,31 +1146,33 @@ export default function Inventory({
                                                             Edit
                                                         </TooltipContent>
                                                     </Tooltip>
-                                                    <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                            <Button
-                                                                type="button"
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="size-8 text-destructive hover:text-destructive"
-                                                                aria-label={`Delete ${item.name}`}
-                                                                onClick={() =>
-                                                                    openDeleteDialog(
-                                                                        item,
-                                                                    )
-                                                                }
-                                                                disabled={
-                                                                    deletingItemId ===
-                                                                    item.id
-                                                                }
-                                                            >
-                                                                <Trash2 className="size-4" />
-                                                            </Button>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent>
-                                                            Delete
-                                                        </TooltipContent>
-                                                    </Tooltip>
+                                                    {isAdmin ? (
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="size-8 text-destructive hover:text-destructive"
+                                                                    aria-label={`Delete ${item.name}`}
+                                                                    onClick={() =>
+                                                                        openDeleteDialog(
+                                                                            item,
+                                                                        )
+                                                                    }
+                                                                    disabled={
+                                                                        deletingItemId ===
+                                                                        item.id
+                                                                    }
+                                                                >
+                                                                    <Trash2 className="size-4" />
+                                                                </Button>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                Delete
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    ) : null}
                                                 </div>
                                             </td>
                                         </tr>
@@ -1229,29 +1237,33 @@ export default function Inventory({
                                                 Edit
                                             </TooltipContent>
                                         </Tooltip>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="gap-1 text-destructive hover:text-destructive"
-                                                    onClick={() =>
-                                                        openDeleteDialog(item)
-                                                    }
-                                                    disabled={
-                                                        deletingItemId ===
-                                                        item.id
-                                                    }
-                                                >
-                                                    <Trash2 className="size-3.5" />
+                                        {isAdmin ? (
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="gap-1 text-destructive hover:text-destructive"
+                                                        onClick={() =>
+                                                            openDeleteDialog(
+                                                                item,
+                                                            )
+                                                        }
+                                                        disabled={
+                                                            deletingItemId ===
+                                                            item.id
+                                                        }
+                                                    >
+                                                        <Trash2 className="size-3.5" />
+                                                        Delete
+                                                    </Button>
+                                                </TooltipTrigger>
+                                                <TooltipContent>
                                                     Delete
-                                                </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                                Delete
-                                            </TooltipContent>
-                                        </Tooltip>
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        ) : null}
                                     </div>
                                 </div>
                             ))
@@ -1302,50 +1314,52 @@ export default function Inventory({
                 </CardContent>
             </Card>
 
-            <Dialog
-                open={isDeleteDialogOpen}
-                onOpenChange={(open) => {
-                    if (!open) {
-                        closeDeleteDialog();
-                    }
-                }}
-            >
-                <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Delete Ingredient</DialogTitle>
-                        <DialogDescription>
-                            {deleteTarget
-                                ? `Would you like to delete ${deleteTarget.name}?`
-                                : 'Would you like to delete this ingredient?'}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            onClick={closeDeleteDialog}
-                            disabled={deletingItemId !== null}
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            type="button"
-                            variant="destructive"
-                            onClick={handleDeleteIngredient}
-                            disabled={deletingItemId !== null || !deleteTarget}
-                        >
-                            {deletingItemId !== null ? (
-                                <>
-                                    <Loader2 className="mr-2 size-4 animate-spin" />
-                                    Deleting...
-                                </>
-                            ) : (
-                                'Delete'
-                            )}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            {isAdmin ? (
+                <Dialog
+                    open={isDeleteDialogOpen}
+                    onOpenChange={(open) => {
+                        if (!open) {
+                            closeDeleteDialog();
+                        }
+                    }}
+                >
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Delete Ingredient</DialogTitle>
+                            <DialogDescription>
+                                {deleteTarget
+                                    ? `Would you like to delete ${deleteTarget.name}?`
+                                    : 'Would you like to delete this ingredient?'}
+                            </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={closeDeleteDialog}
+                                disabled={deletingItemId !== null}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="destructive"
+                                onClick={handleDeleteIngredient}
+                                disabled={deletingItemId !== null || !deleteTarget}
+                            >
+                                {deletingItemId !== null ? (
+                                    <>
+                                        <Loader2 className="mr-2 size-4 animate-spin" />
+                                        Deleting...
+                                    </>
+                                ) : (
+                                    'Delete'
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            ) : null}
         </AppLayout>
     );
 }

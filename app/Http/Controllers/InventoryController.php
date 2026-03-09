@@ -388,6 +388,8 @@ class InventoryController extends Controller
      */
     public function destroyIngredient(Request $request, Ingredient $ingredient): RedirectResponse
     {
+        abort_if(! $request->user()?->isAdmin(), 403);
+
         $ingredient->loadMissing([
             'category:id,name',
             'unit:id,name',

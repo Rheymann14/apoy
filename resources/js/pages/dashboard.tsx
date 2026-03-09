@@ -1,4 +1,4 @@
-import { Head, Link, router } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import {
     ArrowRight,
     Boxes,
@@ -859,6 +859,8 @@ export default function Dashboard({
 }: DashboardPageProps) {
     const metricCardsRef = useRef<HTMLDivElement | null>(null);
     const insightCardsRef = useRef<HTMLDivElement | null>(null);
+    const { auth } = usePage().props;
+    const isAdmin = auth.user.role_slug === 'admin';
     const [metricCardOrder, setMetricCardOrder] = useState<MetricCardId[]>(
         () =>
             getStoredCardOrder(
@@ -1279,17 +1281,19 @@ export default function Dashboard({
                                     <ArrowRight className="ml-2 size-4" />
                                 </Link>
                             </Button>
-                            <Button
-                                asChild
-                                variant="outline"
-                                size="sm"
-                                className="w-full sm:w-auto"
-                            >
-                                <Link href={management()}>
-                                    Open Management
-                                    <ArrowRight className="ml-2 size-4" />
-                                </Link>
-                            </Button>
+                            {isAdmin ? (
+                                <Button
+                                    asChild
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full sm:w-auto"
+                                >
+                                    <Link href={management()}>
+                                        Open Management
+                                        <ArrowRight className="ml-2 size-4" />
+                                    </Link>
+                                </Button>
+                            ) : null}
                         </div>
                     </CardHeader>
                 </Card>
