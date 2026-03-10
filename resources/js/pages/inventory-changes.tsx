@@ -1,7 +1,15 @@
 import { Head, Link, router } from '@inertiajs/react';
-import { ArrowLeft, Clock3, History, Search, UserRound } from 'lucide-react';
+import {
+    ArrowLeft,
+    Clock3,
+    History,
+    Printer,
+    Search,
+    UserRound,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -51,6 +59,26 @@ type InventoryChangesPageProps = {
     filters: Filters;
 };
 
+type InventoryChangeReportSummary = {
+    total_changes: number;
+    added_count: number;
+    edited_count: number;
+    deleted_count: number;
+    unique_ingredients: number;
+    users_involved: number;
+};
+
+type InventoryChangeReportItem = {
+    id: number;
+    change_type: ChangeType;
+    ingredient_name: string;
+    ingredient_code: string;
+    edited_by_name: string;
+    changed_at: string | null;
+    changed_field_count: number;
+    change_summary: string;
+};
+
 const breadcrumbs: BreadcrumbItem[] = [
     {
         title: 'Dashboard',
@@ -75,6 +103,46 @@ const deletedValueFields = [
     'Storage',
     'Status',
 ] as const;
+
+const renderPreviewMessage = (
+    previewWindow: Window,
+    title: string,
+    message: string,
+) => {
+    previewWindow.document.title = title;
+    previewWindow.document.body.innerHTML = '';
+
+    const paragraph = previewWindow.document.createElement('p');
+    paragraph.style.fontFamily = 'Arial, sans-serif';
+    paragraph.style.padding = '16px';
+    paragraph.textContent = message;
+
+    previewWindow.document.body.appendChild(paragraph);
+};
+
+const formatDateRangeLabel = (dateFrom: string, dateTo: string) => {
+    const formatter = new Intl.DateTimeFormat(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+    });
+    const formatDate = (value: string) =>
+        formatter.format(new Date(`${value}T00:00:00`));
+
+    if (dateFrom && dateTo) {
+        return `${formatDate(dateFrom)} to ${formatDate(dateTo)}`;
+    }
+
+    if (dateFrom) {
+        return `From ${formatDate(dateFrom)}`;
+    }
+
+    if (dateTo) {
+        return `Up to ${formatDate(dateTo)}`;
+    }
+
+    return 'All dates';
+};
 
 const toDisplayValue = (value: string | null) => {
     if (value === null || value.trim() === '') {
@@ -145,6 +213,7 @@ export default function InventoryChanges({
     const [search, setSearch] = useState(filters.search ?? '');
     const [dateFrom, setDateFrom] = useState(filters.date_from ?? '');
     const [dateTo, setDateTo] = useState(filters.date_to ?? '');
+    const [isPrinting, setIsPrinting] = useState(false);
 
     const requestParams = useMemo(
         () => ({
@@ -223,6 +292,111 @@ export default function InventoryChanges({
                 replace: true,
             },
         );
+    };
+
+    const handlePrintSummaryReport = async () => {
+        if (typeof window === 'undefined' || isPrinting) {
+            return;
+        }
+
+        const previewWindow = window.open('', '_blank');
+        if (!previewWindow) {
+            toast.error('Allow pop-ups to preview the report.');
+            return;
+        }
+
+        setIsPrinting(true);
+        renderPreviewMessage(
+            previewWindow,
+            'Generating PDF...',
+            'Generating report...',
+        );
+
+        const params = new URLSearchParams();
+        if (search.trim()) {
+            params.set('search', search.trim());
+        }
+        if (dateFrom) {
+            params.set('date_from', dateFrom);
+        }
+        if (dateTo) {
+            params.set('date_to', dateTo);
+        }
+
+        try {
+            const response = await window.fetch(
+                `/inventory/changes/report?${params.toString()}`,
+                {
+                    headers: {
+                        Accept: 'application/json',
+                    },
+                    credentials: 'same-origin',
+                },
+            );
+
+            if (!response.ok) {
+                const payload = (await response.json().catch(() => null)) as
+                    | { message?: string }
+                    | null;
+
+                throw new Error(
+                    payload?.message ??
+                        `Failed to load report data (${response.status})`,
+                );
+            }
+
+            const { summary, items, filters: reportFilters } =
+                (await response.json()) as {
+                    summary: InventoryChangeReportSummary;
+                    items: InventoryChangeReportItem[];
+                    filters: {
+                        search: string;
+                        date_from: string | null;
+                        date_to: string | null;
+                    };
+                };
+            const [{ pdf }, { InventoryChangeHistoryReportDocument }] =
+                await Promise.all([
+                    import('@react-pdf/renderer'),
+                    import(
+                        '@/features/inventory/inventory-change-history-report-document'
+                    ),
+                ]);
+            const generatedAt = new Date().toLocaleString();
+            const reportDocument = (
+                <InventoryChangeHistoryReportDocument
+                    items={items}
+                    summary={summary}
+                    generatedAt={generatedAt}
+                    periodLabel={formatDateRangeLabel(
+                        reportFilters.date_from ?? '',
+                        reportFilters.date_to ?? '',
+                    )}
+                    searchLabel={reportFilters.search || 'All codes'}
+                />
+            );
+            const blob = await pdf(reportDocument).toBlob();
+            const url = URL.createObjectURL(blob);
+            previewWindow.location.href = url;
+
+            window.setTimeout(() => {
+                URL.revokeObjectURL(url);
+            }, 60_000);
+        } catch (error) {
+            const message =
+                error instanceof Error
+                    ? error.message
+                    : 'Unable to generate the report right now. Please try again.';
+
+            toast.error(message);
+            renderPreviewMessage(
+                previewWindow,
+                'Unable to generate report',
+                message,
+            );
+        } finally {
+            setIsPrinting(false);
+        }
     };
 
     return (
@@ -328,6 +502,20 @@ export default function InventoryChanges({
                                 onClick={resetFilters}
                             >
                                 Reset
+                            </Button>
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                    void handlePrintSummaryReport();
+                                }}
+                                disabled={isPrinting}
+                            >
+                                <Printer className="mr-2 size-4" />
+                                {isPrinting
+                                    ? 'Generating Report...'
+                                    : 'Print Summary Report'}
                             </Button>
                         </div>
 

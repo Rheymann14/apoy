@@ -7,6 +7,8 @@ use App\Models\Ingredient;
 use App\Models\IngredientChange;
 use App\Models\Storage;
 use App\Models\Unit;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -22,6 +24,11 @@ class InventoryController extends Controller
      * @var list<string>
      */
     private const STATUSES = ['In Stock', 'Low Stock', 'Out of Stock'];
+
+    /**
+     * Maximum rows allowed in a printable inventory change report.
+     */
+    private const CHANGE_REPORT_LIMIT = 500;
 
     /**
      * Show the inventory page.
@@ -170,36 +177,22 @@ class InventoryController extends Controller
         $dateRangeStart = $dateFrom ? Carbon::parse($dateFrom)->startOfDay() : null;
         $dateRangeEnd = $dateTo ? Carbon::parse($dateTo)->endOfDay() : null;
 
-        $changesQuery = IngredientChange::query()
+        $changesQuery = $this->buildInventoryChangesQuery(
+            $search,
+            $dateRangeStart,
+            $dateRangeEnd,
+        )
             ->with([
                 'ingredient:id,name,code',
                 'editor:id,name',
             ])
-            ->when($search !== '', fn ($query) => $query->where('ingredient_code', 'like', "%{$search}%"))
-            ->when($dateRangeStart, fn ($query, $value) => $query->where('created_at', '>=', $value))
-            ->when($dateRangeEnd, fn ($query, $value) => $query->where('created_at', '<=', $value))
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
         $changes = $changesQuery
             ->paginate($perPage)
             ->withQueryString()
-            ->through(fn (IngredientChange $change) => [
-                'id' => $change->id,
-                'change_type' => (string) ($change->change_type ?: 'edited'),
-                'ingredient_name' => $change->ingredient_name ?: ($change->ingredient?->name ?? 'Deleted Ingredient'),
-                'ingredient_code' => $change->ingredient_code ?: ($change->ingredient?->code ?? 'N/A'),
-                'edited_by_name' => $change->editor?->name ?? 'System',
-                'changed_fields' => collect($change->changed_fields ?? [])
-                    ->map(fn (array $field) => [
-                        'field' => (string) ($field['field'] ?? ''),
-                        'from' => isset($field['from']) ? (string) $field['from'] : null,
-                        'to' => isset($field['to']) ? (string) $field['to'] : null,
-                    ])
-                    ->filter(fn (array $field) => $field['field'] !== '')
-                    ->values(),
-                'changed_at' => $change->created_at?->format('M d, Y h:i A'),
-            ]);
+            ->through(fn (IngredientChange $change) => $this->transformInventoryChange($change));
 
         return Inertia::render('inventory-changes', [
             'changes' => $changes,
@@ -209,6 +202,75 @@ class InventoryController extends Controller
                 'date_to' => $dateTo,
                 'per_page' => $perPage,
             ],
+        ]);
+    }
+
+    /**
+     * Return printable inventory change history rows for the selected filters.
+     */
+    public function changeHistoryReport(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+        ]);
+
+        $search = trim((string) ($validated['search'] ?? ''));
+        $dateFrom = $validated['date_from'] ?? null;
+        $dateTo = $validated['date_to'] ?? null;
+        $dateRangeStart = $dateFrom ? Carbon::parse($dateFrom)->startOfDay() : null;
+        $dateRangeEnd = $dateTo ? Carbon::parse($dateTo)->endOfDay() : null;
+
+        $changesQuery = $this->buildInventoryChangesQuery(
+            $search,
+            $dateRangeStart,
+            $dateRangeEnd,
+        );
+        $totalChanges = (clone $changesQuery)->count('id');
+
+        if ($totalChanges > self::CHANGE_REPORT_LIMIT) {
+            return response()->json([
+                'message' => sprintf(
+                    'This report includes %d changes. Please narrow the date range to %d changes or fewer before exporting.',
+                    $totalChanges,
+                    self::CHANGE_REPORT_LIMIT,
+                ),
+                'limit' => self::CHANGE_REPORT_LIMIT,
+                'total' => $totalChanges,
+            ], 422);
+        }
+
+        $items = $changesQuery
+            ->with(['ingredient:id,name,code', 'editor:id,name'])
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (IngredientChange $change) => $this->transformInventoryChangeReportItem($change))
+            ->values();
+
+        return response()->json([
+            'filters' => [
+                'search' => $search,
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+            ],
+            'summary' => [
+                'total_changes' => $items->count(),
+                'added_count' => $items->where('change_type', 'added')->count(),
+                'edited_count' => $items->where('change_type', 'edited')->count(),
+                'deleted_count' => $items->where('change_type', 'deleted')->count(),
+                'unique_ingredients' => $items
+                    ->map(fn (array $item) => sprintf('%s|%s', $item['ingredient_code'], $item['ingredient_name']))
+                    ->unique()
+                    ->count(),
+                'users_involved' => $items
+                    ->pluck('edited_by_name')
+                    ->filter(fn (string $name) => $name !== '')
+                    ->unique()
+                    ->count(),
+            ],
+            'items' => $items,
         ]);
     }
 
@@ -478,5 +540,115 @@ class InventoryController extends Controller
         $prefix = str_pad(substr($prefix, 0, 3), 3, 'X');
 
         return sprintf('%s-%04d', $prefix, $id);
+    }
+
+    /**
+     * Build the base filtered query for inventory change history.
+     */
+    private function buildInventoryChangesQuery(
+        string $search,
+        ?Carbon $dateRangeStart,
+        ?Carbon $dateRangeEnd,
+    ): Builder {
+        return IngredientChange::query()
+            ->when($search !== '', fn (Builder $query) => $query->where('ingredient_code', 'like', "%{$search}%"))
+            ->when($dateRangeStart, fn (Builder $query, Carbon $value) => $query->where('created_at', '>=', $value))
+            ->when($dateRangeEnd, fn (Builder $query, Carbon $value) => $query->where('created_at', '<=', $value));
+    }
+
+    /**
+     * Normalize the changed fields payload for display and export.
+     *
+     * @return array<int, array{field: string, from: ?string, to: ?string}>
+     */
+    private function normalizeChangedFields(IngredientChange $change): array
+    {
+        return collect($change->changed_fields ?? [])
+            ->map(function (array $field) {
+                $from = array_key_exists('from', $field) && $field['from'] !== null
+                    ? (string) $field['from']
+                    : null;
+                $to = array_key_exists('to', $field) && $field['to'] !== null
+                    ? (string) $field['to']
+                    : null;
+
+                return [
+                    'field' => (string) ($field['field'] ?? ''),
+                    'from' => $from,
+                    'to' => $to,
+                ];
+            })
+            ->filter(fn (array $field) => $field['field'] !== '')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Transform a change row for the on-page history view.
+     *
+     * @return array<string, mixed>
+     */
+    private function transformInventoryChange(IngredientChange $change): array
+    {
+        return [
+            'id' => $change->id,
+            'change_type' => (string) ($change->change_type ?: 'edited'),
+            'ingredient_name' => $change->ingredient_name ?: ($change->ingredient?->name ?? 'Deleted Ingredient'),
+            'ingredient_code' => $change->ingredient_code ?: ($change->ingredient?->code ?? 'N/A'),
+            'edited_by_name' => $change->editor?->name ?? 'System',
+            'changed_fields' => $this->normalizeChangedFields($change),
+            'changed_at' => $change->created_at?->format('M d, Y h:i A'),
+        ];
+    }
+
+    /**
+     * Transform a change row for the printable summary report.
+     *
+     * @return array<string, mixed>
+     */
+    private function transformInventoryChangeReportItem(IngredientChange $change): array
+    {
+        $changedFields = $this->normalizeChangedFields($change);
+        $changeType = (string) ($change->change_type ?: 'edited');
+
+        return [
+            'id' => $change->id,
+            'change_type' => $changeType,
+            'ingredient_name' => $change->ingredient_name ?: ($change->ingredient?->name ?? 'Deleted Ingredient'),
+            'ingredient_code' => $change->ingredient_code ?: ($change->ingredient?->code ?? 'N/A'),
+            'edited_by_name' => $change->editor?->name ?? 'System',
+            'changed_at' => $change->created_at?->format('M d, Y h:i A'),
+            'changed_field_count' => count($changedFields),
+            'change_summary' => $this->summarizeChangedFields($changedFields, $changeType),
+        ];
+    }
+
+    /**
+     * Build a short printable summary for the changed fields list.
+     *
+     * @param  array<int, array{field: string, from: ?string, to: ?string}>  $changedFields
+     */
+    private function summarizeChangedFields(array $changedFields, string $changeType): string
+    {
+        $fieldNames = collect($changedFields)
+            ->pluck('field')
+            ->filter(fn (string $field) => $field !== '')
+            ->values();
+
+        if ($fieldNames->isEmpty()) {
+            return match ($changeType) {
+                'added' => 'New ingredient record',
+                'deleted' => 'Deleted ingredient record',
+                default => 'Updated ingredient record',
+            };
+        }
+
+        $summary = $fieldNames->take(4)->implode(', ');
+
+        if ($fieldNames->count() > 4) {
+            $summary .= sprintf(' +%d more', $fieldNames->count() - 4);
+        }
+
+        return $summary;
     }
 }
