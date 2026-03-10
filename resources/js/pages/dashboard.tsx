@@ -6,11 +6,13 @@ import {
     Layers,
     PackageCheck,
     PackageX,
+    Plus,
     Printer,
     RotateCcw,
     TriangleAlert,
     Users,
     Warehouse,
+    X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEventHandler } from 'react';
@@ -144,6 +146,8 @@ const defaultInsightCardOrder: InsightCardId[] = [
 ];
 const metricCardOrderStorageKey = 'dashboard.metric-card-order.v1';
 const insightCardOrderStorageKey = 'dashboard.insight-card-order.v1';
+const hiddenMetricCardsStorageKey = 'dashboard.hidden-metric-cards.v1';
+const hiddenInsightCardsStorageKey = 'dashboard.hidden-insight-cards.v1';
 
 const areCardOrdersEqual = <T extends string>(
     current: readonly T[],
@@ -221,6 +225,37 @@ const getStoredCardOrder = <T extends string>(
     }
 };
 
+const getStoredHiddenCards = <T extends string>(
+    storageKey: string,
+    validIds: readonly T[],
+) => {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+
+    try {
+        const raw = window.localStorage.getItem(storageKey);
+        if (!raw) {
+            return null;
+        }
+
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+            return null;
+        }
+
+        const validIdSet = new Set(validIds);
+        const normalized = parsed.filter(
+            (item): item is T =>
+                typeof item === 'string' && validIdSet.has(item as T),
+        );
+
+        return Array.from(new Set(normalized));
+    } catch {
+        return null;
+    }
+};
+
 const persistCardOrder = <T extends string>(
     storageKey: string,
     currentOrder: readonly T[],
@@ -236,6 +271,46 @@ const persistCardOrder = <T extends string>(
     }
 
     window.localStorage.setItem(storageKey, JSON.stringify(currentOrder));
+};
+
+const persistHiddenCards = <T extends string>(
+    storageKey: string,
+    hiddenCards: readonly T[],
+) => {
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    if (hiddenCards.length === 0) {
+        window.localStorage.removeItem(storageKey);
+        return;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(hiddenCards));
+};
+
+const mergeVisibleCardOrder = <T extends string>(
+    visibleOrder: readonly T[],
+    currentOrder: readonly T[],
+    hiddenIds: readonly T[],
+) => {
+    if (hiddenIds.length === 0) {
+        return [...visibleOrder];
+    }
+
+    const hiddenIdSet = new Set(hiddenIds);
+    let visibleIndex = 0;
+
+    return currentOrder.map((cardId) => {
+        if (hiddenIdSet.has(cardId)) {
+            return cardId;
+        }
+
+        const nextVisibleCardId = visibleOrder[visibleIndex];
+        visibleIndex += 1;
+
+        return nextVisibleCardId ?? cardId;
+    });
 };
 
 const draggingCardClasses = [
@@ -875,6 +950,22 @@ export default function Dashboard({
                 defaultInsightCardOrder,
             ) ?? defaultInsightCardOrder,
     );
+    const [hiddenMetricCards, setHiddenMetricCards] = useState<MetricCardId[]>(
+        () =>
+            getStoredHiddenCards(
+                hiddenMetricCardsStorageKey,
+                defaultMetricCardOrder,
+            ) ?? [],
+    );
+    const [hiddenInsightCards, setHiddenInsightCards] = useState<
+        InsightCardId[]
+    >(
+        () =>
+            getStoredHiddenCards(
+                hiddenInsightCardsStorageKey,
+                defaultInsightCardOrder,
+            ) ?? [],
+    );
 
     useEffect(() => {
         let isReloading = false;
@@ -936,19 +1027,28 @@ export default function Dashboard({
             },
             onEnd: (event) => {
                 toggleDraggingCardHighlight(event.item, false);
-                const newOrder = readCardOrderFromContainer(
+                const visibleOrder = readCardOrderFromContainer(
                     container,
                     defaultMetricCardOrder,
                 );
 
-                if (newOrder.length === defaultMetricCardOrder.length) {
-                    setMetricCardOrder(newOrder);
+                if (
+                    visibleOrder.length ===
+                    defaultMetricCardOrder.length - hiddenMetricCards.length
+                ) {
+                    setMetricCardOrder((currentOrder) =>
+                        mergeVisibleCardOrder(
+                            visibleOrder,
+                            currentOrder,
+                            hiddenMetricCards,
+                        ),
+                    );
                 }
             },
         });
 
         return () => sortable.destroy();
-    }, []);
+    }, [hiddenMetricCards]);
 
     useEffect(() => {
         const container = insightCardsRef.current;
@@ -968,19 +1068,29 @@ export default function Dashboard({
             },
             onEnd: (event) => {
                 toggleDraggingCardHighlight(event.item, false);
-                const newOrder = readCardOrderFromContainer(
+                const visibleOrder = readCardOrderFromContainer(
                     container,
                     defaultInsightCardOrder,
                 );
 
-                if (newOrder.length === defaultInsightCardOrder.length) {
-                    setInsightCardOrder(newOrder);
+                if (
+                    visibleOrder.length ===
+                    defaultInsightCardOrder.length -
+                        hiddenInsightCards.length
+                ) {
+                    setInsightCardOrder((currentOrder) =>
+                        mergeVisibleCardOrder(
+                            visibleOrder,
+                            currentOrder,
+                            hiddenInsightCards,
+                        ),
+                    );
                 }
             },
         });
 
         return () => sortable.destroy();
-    }, []);
+    }, [hiddenInsightCards]);
 
     useEffect(() => {
         persistCardOrder(
@@ -997,6 +1107,14 @@ export default function Dashboard({
             defaultInsightCardOrder,
         );
     }, [insightCardOrder]);
+
+    useEffect(() => {
+        persistHiddenCards(hiddenMetricCardsStorageKey, hiddenMetricCards);
+    }, [hiddenMetricCards]);
+
+    useEffect(() => {
+        persistHiddenCards(hiddenInsightCardsStorageKey, hiddenInsightCards);
+    }, [hiddenInsightCards]);
 
     const totalTrackedStatuses =
         counts.in_stock + counts.low_stock + counts.out_of_stock;
@@ -1076,6 +1194,13 @@ export default function Dashboard({
         },
     ] as const;
     const orderedMetricCards = orderCardsById(metricCards, metricCardOrder);
+    const hiddenMetricCardSet = new Set(hiddenMetricCards);
+    const visibleMetricCards = orderedMetricCards.filter(
+        (card) => !hiddenMetricCardSet.has(card.id),
+    );
+    const availableMetricCards = metricCards.filter((card) =>
+        hiddenMetricCardSet.has(card.id),
+    );
 
     const handlePrintStatusReport = async (status: InventoryStatus) => {
         if (typeof window === 'undefined') {
@@ -1244,13 +1369,50 @@ export default function Dashboard({
         },
     ] as const;
     const orderedInsightCards = orderCardsById(insightCards, insightCardOrder);
+    const hiddenInsightCardSet = new Set(hiddenInsightCards);
+    const visibleInsightCards = orderedInsightCards.filter(
+        (card) => !hiddenInsightCardSet.has(card.id),
+    );
+    const availableInsightCards = insightCards.filter((card) =>
+        hiddenInsightCardSet.has(card.id),
+    );
+    const hiddenCardCount =
+        availableMetricCards.length + availableInsightCards.length;
     const isDefaultCardLayout =
         areCardOrdersEqual(metricCardOrder, defaultMetricCardOrder) &&
-        areCardOrdersEqual(insightCardOrder, defaultInsightCardOrder);
+        areCardOrdersEqual(insightCardOrder, defaultInsightCardOrder) &&
+        hiddenMetricCards.length === 0 &&
+        hiddenInsightCards.length === 0;
+
+    const hideMetricCard = (cardId: MetricCardId) => {
+        setHiddenMetricCards((current) =>
+            current.includes(cardId) ? current : [...current, cardId],
+        );
+    };
+
+    const showMetricCard = (cardId: MetricCardId) => {
+        setHiddenMetricCards((current) =>
+            current.filter((currentCardId) => currentCardId !== cardId),
+        );
+    };
+
+    const hideInsightCard = (cardId: InsightCardId) => {
+        setHiddenInsightCards((current) =>
+            current.includes(cardId) ? current : [...current, cardId],
+        );
+    };
+
+    const showInsightCard = (cardId: InsightCardId) => {
+        setHiddenInsightCards((current) =>
+            current.filter((currentCardId) => currentCardId !== cardId),
+        );
+    };
 
     const handleResetCardLayout = () => {
         setMetricCardOrder(defaultMetricCardOrder);
         setInsightCardOrder(defaultInsightCardOrder);
+        setHiddenMetricCards([]);
+        setHiddenInsightCards([]);
     };
 
     return (
@@ -1303,27 +1465,89 @@ export default function Dashboard({
                         Key Metrics
                     </h2>
                     <p className="text-xs text-muted-foreground">
-                        Arrange cards using the top-right handle.
+                        Arrange cards using the handle, or remove a card with
+                        the close button.
                     </p>
                 </div>
 
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full sm:w-auto"
-                    onClick={handleResetCardLayout}
-                    disabled={isDefaultCardLayout}
-                >
-                    <RotateCcw className="mr-2 size-4" />
-                    Reset Layout
-                </Button>
+                <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="w-full sm:w-auto"
+                            onClick={handleResetCardLayout}
+                            disabled={isDefaultCardLayout}
+                        >
+                            <RotateCcw className="mr-2 size-4" />
+                            Reset Layout
+                        </Button>
+                        {hiddenCardCount > 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                                {hiddenCardCount} hidden card
+                                {hiddenCardCount === 1 ? '' : 's'} can be added
+                                back below.
+                            </p>
+                        ) : null}
+                    </div>
+
+                    {hiddenCardCount > 0 ? (
+                        <Card className="border-dashed border-border/70 bg-card/70">
+                            <CardHeader className="pb-3">
+                                <CardTitle className="text-sm">
+                                    Add Back Hidden Cards
+                                </CardTitle>
+                                <CardDescription>
+                                    Restore any card you removed from the
+                                    dashboard.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="flex flex-wrap gap-2 pt-0">
+                                {availableMetricCards.map((card) => (
+                                    <Button
+                                        key={card.id}
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => showMetricCard(card.id)}
+                                    >
+                                        <Plus className="mr-2 size-4" />
+                                        {card.title}
+                                    </Button>
+                                ))}
+                                {availableInsightCards.map((card) => (
+                                    <Button
+                                        key={card.id}
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() =>
+                                            showInsightCard(card.id)
+                                        }
+                                    >
+                                        <Plus className="mr-2 size-4" />
+                                        {card.title}
+                                    </Button>
+                                ))}
+                            </CardContent>
+                        </Card>
+                    ) : null}
+                </div>
 
                 <div
                     ref={metricCardsRef}
                     className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6"
                 >
-                    {orderedMetricCards.map((item) => (
+                    {visibleMetricCards.length === 0 ? (
+                        <Card className="border-dashed border-border/70 bg-card/70 sm:col-span-2 lg:col-span-6">
+                            <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                                All metric cards are hidden. Use the add-back
+                                buttons above to restore them.
+                            </CardContent>
+                        </Card>
+                    ) : null}
+                    {visibleMetricCards.map((item) => (
                         <div
                             key={item.id}
                             data-card-id={item.id}
@@ -1333,6 +1557,16 @@ export default function Dashboard({
                                 data-dashboard-card
                                 className="relative min-w-0 border-border/70 bg-card/90 shadow-sm transition-shadow hover:shadow-md"
                             >
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="absolute top-2 right-10 z-10 size-7 text-muted-foreground"
+                                    onClick={() => hideMetricCard(item.id)}
+                                    aria-label={`Remove ${item.title}`}
+                                >
+                                    <X className="size-4" />
+                                </Button>
                                 <span
                                     data-drag-handle
                                     className="absolute top-3 right-3 z-10 cursor-grab rounded-sm p-0.5 text-muted-foreground active:cursor-grabbing"
@@ -1386,7 +1620,7 @@ export default function Dashboard({
                         Operational Insights
                     </h2>
                     <p className="text-xs text-muted-foreground">
-                        Charts and latest activity at a glance.
+                        Charts and latest activity.
                     </p>
                 </div>
 
@@ -1394,7 +1628,15 @@ export default function Dashboard({
                     ref={insightCardsRef}
                     className="grid gap-4 lg:grid-cols-3 xl:grid-cols-12"
                 >
-                    {orderedInsightCards.map((item) => (
+                    {visibleInsightCards.length === 0 ? (
+                        <Card className="border-dashed border-border/70 bg-card/70 lg:col-span-3 xl:col-span-12">
+                            <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                                All insight cards are hidden. Use the add-back
+                                buttons above to restore them.
+                            </CardContent>
+                        </Card>
+                    ) : null}
+                    {visibleInsightCards.map((item) => (
                         <div
                             key={item.id}
                             data-card-id={item.id}
@@ -1404,6 +1646,16 @@ export default function Dashboard({
                                 data-dashboard-card
                                 className={`relative flex min-w-0 flex-col border-border/70 bg-card/90 shadow-sm transition-shadow hover:shadow-md ${item.panelClassName}`}
                             >
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="absolute top-2 right-10 z-10 size-7 text-muted-foreground"
+                                    onClick={() => hideInsightCard(item.id)}
+                                    aria-label={`Remove ${item.title}`}
+                                >
+                                    <X className="size-4" />
+                                </Button>
                                 <span
                                     data-drag-handle
                                     className="absolute top-3 right-3 z-10 cursor-grab rounded-sm p-0.5 text-muted-foreground active:cursor-grabbing"
